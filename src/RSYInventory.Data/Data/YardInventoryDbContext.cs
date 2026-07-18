@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using RSYInventory.Data.Entities;
-using RSYInventory.Data.Enums;
 
 namespace RSYInventory.Data.Data;
 
@@ -40,6 +39,8 @@ public class YardInventoryDbContext : DbContext
         {
             entity.ToTable("Roles");
             entity.HasKey(e => e.Id);
+            // Fixed role ids (1..4) live in SQL; not an IDENTITY column.
+            entity.Property(e => e.Id).ValueGeneratedNever();
             entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.Code).HasConversion<int>();
@@ -183,101 +184,7 @@ public class YardInventoryDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        SeedReferenceData(modelBuilder);
-    }
-
-    private static void SeedReferenceData(ModelBuilder modelBuilder)
-    {
-        modelBuilder.Entity<Role>().HasData(
-            new Role { Id = 1, Code = AppRole.InventoryViewer, Name = "Inventory Viewer", Description = "View inventory and locations only." },
-            new Role { Id = 2, Code = AppRole.InventoryEditor, Name = "Inventory Editor", Description = "Add, edit, remove inventory; assign vehicle locations." },
-            new Role { Id = 3, Code = AppRole.ZoneManager, Name = "Zone Manager", Description = "Create and edit zones, rows, and pallets for parts and vehicles." },
-            new Role { Id = 4, Code = AppRole.VehicleAcquirer, Name = "Vehicle Acquirer", Description = "Register newly acquired vehicles without assigning yard location." }
-        );
-
-        modelBuilder.Entity<VehicleSource>().HasData(
-            new VehicleSource { Id = 1, Name = "Wheelzy", IsActive = true },
-            new VehicleSource { Id = 2, Name = "Pebble", IsActive = true },
-            new VehicleSource { Id = 3, Name = "Facebook", IsActive = true },
-            new VehicleSource { Id = 4, Name = "Other", IsActive = true }
-        );
-
-        // Demo user for Visual Studio / local debugging (matches DevCurrentUserService.UserId = 1).
-        modelBuilder.Entity<User>().HasData(
-            new User
-            {
-                Id = 1,
-                UserName = "demo",
-                DisplayName = "Demo Admin",
-                Email = "demo@rsy.local",
-                IsActive = true,
-                CreatedAtUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
-            }
-        );
-
-        modelBuilder.Entity<UserRole>().HasData(
-            new UserRole { UserId = 1, RoleId = 1 },
-            new UserRole { UserId = 1, RoleId = 2 },
-            new UserRole { UserId = 1, RoleId = 3 },
-            new UserRole { UserId = 1, RoleId = 4 }
-        );
-
-        // Default vehicle zones: Zona A and Zona B + one parts zone for engines/transmissions.
-        modelBuilder.Entity<Zone>().HasData(
-            new Zone
-            {
-                Id = 1,
-                Name = "Zona A",
-                Purpose = ZonePurpose.Vehicles,
-                RowCount = 2,
-                PalletsPerRow = 2,
-                IsActive = true,
-                CreatedAtUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
-            },
-            new Zone
-            {
-                Id = 2,
-                Name = "Zona B",
-                Purpose = ZonePurpose.Vehicles,
-                RowCount = 2,
-                PalletsPerRow = 2,
-                IsActive = true,
-                CreatedAtUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
-            },
-            new Zone
-            {
-                Id = 3,
-                Name = "Zona Partes",
-                Purpose = ZonePurpose.Parts,
-                RowCount = 2,
-                PalletsPerRow = 2,
-                IsActive = true,
-                CreatedAtUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
-            }
-        );
-
-        modelBuilder.Entity<Row>().HasData(
-            new Row { Id = 1, ZoneId = 1, RowNumber = 1, Label = "A-R1", IsActive = true },
-            new Row { Id = 2, ZoneId = 1, RowNumber = 2, Label = "A-R2", IsActive = true },
-            new Row { Id = 3, ZoneId = 2, RowNumber = 1, Label = "B-R1", IsActive = true },
-            new Row { Id = 4, ZoneId = 2, RowNumber = 2, Label = "B-R2", IsActive = true },
-            new Row { Id = 5, ZoneId = 3, RowNumber = 1, Label = "P-R1", IsActive = true },
-            new Row { Id = 6, ZoneId = 3, RowNumber = 2, Label = "P-R2", IsActive = true }
-        );
-
-        modelBuilder.Entity<Pallet>().HasData(
-            new Pallet { Id = 1, RowId = 1, PalletNumber = 1, Label = "A-R1-P1", IsActive = true },
-            new Pallet { Id = 2, RowId = 1, PalletNumber = 2, Label = "A-R1-P2", IsActive = true },
-            new Pallet { Id = 3, RowId = 2, PalletNumber = 1, Label = "A-R2-P1", IsActive = true },
-            new Pallet { Id = 4, RowId = 2, PalletNumber = 2, Label = "A-R2-P2", IsActive = true },
-            new Pallet { Id = 5, RowId = 3, PalletNumber = 1, Label = "B-R1-P1", IsActive = true },
-            new Pallet { Id = 6, RowId = 3, PalletNumber = 2, Label = "B-R1-P2", IsActive = true },
-            new Pallet { Id = 7, RowId = 4, PalletNumber = 1, Label = "B-R2-P1", IsActive = true },
-            new Pallet { Id = 8, RowId = 4, PalletNumber = 2, Label = "B-R2-P2", IsActive = true },
-            new Pallet { Id = 9, RowId = 5, PalletNumber = 1, Label = "P-R1-P1", IsActive = true },
-            new Pallet { Id = 10, RowId = 5, PalletNumber = 2, Label = "P-R1-P2", IsActive = true },
-            new Pallet { Id = 11, RowId = 6, PalletNumber = 1, Label = "P-R2-P1", IsActive = true },
-            new Pallet { Id = 12, RowId = 6, PalletNumber = 2, Label = "P-R2-P2", IsActive = true }
-        );
+        // Reference/demo rows are stored in SQL Server via ReferenceDataSeeder
+        // and resources/Database/*.sql — not as in-memory HasData.
     }
 }

@@ -4,8 +4,8 @@ using Microsoft.EntityFrameworkCore.Design;
 namespace RSYInventory.Data.Data;
 
 /// <summary>
-/// Design-time factory for EF Core tools (migrations / scaffolding).
-/// Update the connection string to match your local SQL Server instance.
+/// Design-time factory for EF Core tools. Points at the local RSYYardInventory database.
+/// Runtime uses ConnectionStrings:YardInventory from appsettings (Dev local / Prod server).
 /// </summary>
 public class YardInventoryDbContextFactory : IDesignTimeDbContextFactory<YardInventoryDbContext>
 {

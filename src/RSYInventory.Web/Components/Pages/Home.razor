@@ -1,4 +1,8 @@
 ﻿@page "/"
+@rendermode InteractiveServer
+@using RSYInventory.Data.Services
+@inject ICurrentUserService CurrentUser
+@inject IConfiguration Config
 
 <PageTitle>RSY Yard Inventory</PageTitle>
 
@@ -12,8 +16,32 @@
     <li><a href="zones">Zonas</a> — filas y paletas (partes y vehículos)</li>
 </ul>
 
-<p class="text-muted">
-    Usuario demo (debug): Demo Admin. Configura SQL Server / LocalDB y ejecuta
-    <code>resources/Database/001_InitialSchema.sql</code> y
-    <code>002_DemoUserAndPartsZone.sql</code>.
-</p>
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else
+{
+    <p class="text-muted">
+        Base de datos: <code>RSYYardInventory</code>
+        · Usuario actual (desde SQL): <strong>@_userLabel</strong>
+        · Connection: <code>ConnectionStrings:YardInventory</code>
+    </p>
+}
+
+@code {
+    private string? _error;
+    private string _userLabel = "…";
+
+    protected override void OnInitialized()
+    {
+        try
+        {
+            _userLabel = $"{CurrentUser.DisplayName} (id {CurrentUser.UserId}, config user '{Config["App:CurrentUserName"]}')";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+}

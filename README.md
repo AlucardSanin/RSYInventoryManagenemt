@@ -13,7 +13,7 @@ Solución: `RSYInventory.slnx`
 
 ## Depurar en Visual Studio (tu PC)
 
-El agente Cloud empuja cambios a GitHub; en tu máquina solo tienes que actualizar la rama:
+El agente Cloud empuja cambios a GitHub; en tu máquina actualiza la rama:
 
 ```powershell
 git fetch origin
@@ -22,16 +22,17 @@ git pull origin cursor/yard-inventory-foundation-a4a6
 ```
 
 1. Abre `RSYInventory.slnx` en Visual Studio 2022.
-2. En SSMS, crea la BD `RSYYardInventory` y ejecuta en orden:
-   - `resources/Database/001_InitialSchema.sql`
-   - `resources/Database/002_DemoUserAndPartsZone.sql`
-3. Ajusta la connection string si no usas LocalDB:
-   - Dev: `src/RSYInventory.Web/appsettings.Development.json` → `(localdb)\MSSQLLocalDB`
-   - O tu instancia SQL: `Server=localhost;Database=RSYYardInventory;Trusted_Connection=True;TrustServerCertificate=True;`
-4. Establece `RSYInventory.Web` como proyecto de inicio y pulsa F5.
+2. Ten creada la BD local **`RSYYardInventory`** (ya la tienes).
+3. Connection string (solo cambias esto al pasar al servidor):
+   - **Local (Development):** `src/RSYInventory.Web/appsettings.Development.json`
+     ```
+     Server=localhost;Database=RSYYardInventory;Trusted_Connection=True;TrustServerCertificate=True;
+     ```
+   - **Servidor (Production):** `src/RSYInventory.Web/appsettings.Production.json`
+4. Al arrancar, la app escribe en SQL los datos de referencia si faltan (roles, fuentes, Zona A/B/Partes, usuario `demo`). También puedes aplicar `resources/Database/*.sql` en SSMS.
+5. Proyecto de inicio: `RSYInventory.Web` → F5.
 
-Repo: https://github.com/AlucardSanin/RSYInventoryManagenemt  
-PR: https://github.com/AlucardSanin/RSYInventoryManagenemt/pull/1
+El usuario actual se lee **desde la tabla `Users`** (`App:CurrentUserName` = `demo`), no está hardcodeado en memoria.
 
 ## Pantallas web (ya disponibles)
 
