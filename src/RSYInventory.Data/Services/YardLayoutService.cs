@@ -26,7 +26,10 @@ public class YardLayoutService
             .Where(z => z.IsActive);
 
         if (purpose is not null)
-            query = query.Where(z => z.Purpose == purpose);
+        {
+            var purposeValue = (int)purpose.Value;
+            query = query.Where(z => z.Purpose == purposeValue);
+        }
 
         return await query
             .OrderBy(z => z.Purpose)
@@ -36,10 +39,11 @@ public class YardLayoutService
 
     public async Task<List<Pallet>> GetPalletsAsync(ZonePurpose purpose, CancellationToken ct = default)
     {
+        var purposeValue = (int)purpose;
         return await _db.Pallets
             .AsNoTracking()
             .Include(p => p.Row)!.ThenInclude(r => r!.Zone)
-            .Where(p => p.IsActive && p.Row.IsActive && p.Row.Zone.IsActive && p.Row.Zone.Purpose == purpose)
+            .Where(p => p.IsActive && p.Row.IsActive && p.Row.Zone.IsActive && p.Row.Zone.Purpose == purposeValue)
             .OrderBy(p => p.Row.Zone.Name)
             .ThenBy(p => p.Row.RowNumber)
             .ThenBy(p => p.PalletNumber)
@@ -62,14 +66,15 @@ public class YardLayoutService
         if (rowCount < 1 || palletsPerRow < 1)
             throw new InvalidOperationException("La zona debe tener al menos 1 fila y 1 paleta por fila.");
 
-        if (await _db.Zones.AnyAsync(z => z.Name == name && z.Purpose == purpose, ct))
+        var purposeValue = (int)purpose;
+        if (await _db.Zones.AnyAsync(z => z.Name == name && z.Purpose == purposeValue, ct))
             throw new InvalidOperationException("Ya existe una zona con ese nombre y propósito.");
 
         var zone = new Zone
         {
             Name = name.Trim(),
-            Purpose = purpose,
-            RowCount = rowCount,
+            Purpose = purposeValue,
+            RowAmount = rowCount,
             PalletsPerRow = palletsPerRow,
             IsActive = true,
             CreatedAtUtc = DateTime.UtcNow
@@ -119,6 +124,8 @@ public class YardLayoutService
         if (newRowCount < 1 || newPalletsPerRow < 1)
             throw new InvalidOperationException("La zona debe tener al menos 1 fila y 1 paleta por fila.");
 
+        var available = (int)InventoryItemStatus.Available;
+
         // Shrink: only remove empty trailing rows/pallets
         var rowsOrdered = zone.Rows.OrderBy(r => r.RowNumber).ToList();
         if (newRowCount < rowsOrdered.Count)
@@ -126,7 +133,7 @@ public class YardLayoutService
             var toRemove = rowsOrdered.Skip(newRowCount).ToList();
             foreach (var row in toRemove)
             {
-                var inv = row.Pallets.SelectMany(p => p.InventoryItems.Where(i => i.Status == InventoryItemStatus.Available)).Count();
+                var inv = row.Pallets.SelectMany(p => p.InventoryItems.Where(i => i.Status == available)).Count();
                 var veh = row.Pallets.SelectMany(p => p.Vehicles).Count();
                 if (!YardLayoutRules.CanDeleteLocation(inv, veh))
                     throw new InvalidOperationException(YardLayoutRules.DeletionBlockedMessage + $" (Fila {row.RowNumber})");
@@ -143,7 +150,7 @@ public class YardLayoutService
                 var toRemove = palletsOrdered.Skip(newPalletsPerRow).ToList();
                 foreach (var pallet in toRemove)
                 {
-                    var inv = pallet.InventoryItems.Count(i => i.Status == InventoryItemStatus.Available);
+                    var inv = pallet.InventoryItems.Count(i => i.Status == available);
                     var veh = pallet.Vehicles.Count;
                     if (!YardLayoutRules.CanDeleteLocation(inv, veh))
                         throw new InvalidOperationException(YardLayoutRules.DeletionBlockedMessage + $" (Paleta {pallet.PalletNumber})");
@@ -185,7 +192,7 @@ public class YardLayoutService
             _db.Rows.Add(row);
         }
 
-        zone.RowCount = newRowCount;
+        zone.RowAmount = newRowCount;
         zone.PalletsPerRow = newPalletsPerRow;
         zone.UpdatedAtUtc = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
@@ -205,8 +212,9 @@ public class YardLayoutService
             .FirstOrDefaultAsync(z => z.Id == zoneId, ct)
             ?? throw new InvalidOperationException("Zona no encontrada.");
 
+        var available = (int)InventoryItemStatus.Available;
         var inv = zone.Rows.SelectMany(r => r.Pallets).SelectMany(p => p.InventoryItems)
-            .Count(i => i.Status == InventoryItemStatus.Available);
+            .Count(i => i.Status == available);
         var veh = zone.Rows.SelectMany(r => r.Pallets).SelectMany(p => p.Vehicles).Count();
 
         if (!YardLayoutRules.CanDeleteLocation(inv, veh))

@@ -79,8 +79,8 @@ public class VehicleService
             Year = year,
             Make = make,
             Model = model,
-            TransmissionType = transmissionType,
-            DriveType = driveType,
+            TransmissionType = transmissionType is null ? null : (int)transmissionType,
+            DriveType = driveType is null ? null : (int)driveType,
             Mileage = mileage,
             Observations = observations,
             VehicleSourceId = vehicleSourceId,
@@ -95,7 +95,7 @@ public class VehicleService
 
         _db.InventoryMovements.Add(new InventoryMovement
         {
-            MovementType = MovementType.Acquired,
+            MovementType = (int)MovementType.Acquired,
             VehicleId = vehicle.Id,
             UserId = _currentUser.UserId,
             Notes = $"Adquirido desde fuente #{vehicleSourceId}",
@@ -122,7 +122,7 @@ public class VehicleService
             .FirstOrDefaultAsync(p => p.Id == palletId && p.IsActive, ct)
             ?? throw new InvalidOperationException("Paleta no encontrada o inactiva.");
 
-        if (pallet.Row.Zone.Purpose != ZonePurpose.Vehicles)
+        if (pallet.Row.Zone.Purpose != (int)ZonePurpose.Vehicles)
             throw new InvalidOperationException("Solo se pueden ubicar vehículos en zonas de vehículos.");
 
         var fromPalletId = vehicle.PalletId;
@@ -131,7 +131,7 @@ public class VehicleService
 
         _db.InventoryMovements.Add(new InventoryMovement
         {
-            MovementType = fromPalletId is null ? MovementType.Assigned : MovementType.Relocated,
+            MovementType = (int)(fromPalletId is null ? MovementType.Assigned : MovementType.Relocated),
             VehicleId = vehicle.Id,
             FromPalletId = fromPalletId,
             ToPalletId = palletId,

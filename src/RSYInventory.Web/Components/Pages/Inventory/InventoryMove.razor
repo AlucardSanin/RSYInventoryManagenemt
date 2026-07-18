@@ -23,7 +23,7 @@
 else if (_item is not null)
 {
     <p>
-        <strong>@(_item.ItemType == InventoryItemType.Engine ? "Motor" : "Transmisión")</strong>
+        <strong>@(_item.ItemType == (int)InventoryItemType.Engine ? "Motor" : "Transmisión")</strong>
         @_item.Brand @_item.Model
         <br />
         Ubicación actual: @(_item.Pallet is null ? "—" : YardLayoutService.FormatPalletLabel(_item.Pallet))

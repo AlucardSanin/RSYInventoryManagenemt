@@ -67,8 +67,7 @@ public sealed class DatabaseCurrentUserService : ICurrentUserService
 
         var user = _db.Users
             .AsNoTracking()
-            .Include(u => u.UserRoles)
-                .ThenInclude(ur => ur.Role)
+            .Include(u => u.Roles)
             .FirstOrDefault(u => u.UserName == _userName && u.IsActive)
             ?? throw new InvalidOperationException(
                 $"Usuario '{_userName}' no encontrado en RSYYardInventory. " +
@@ -76,7 +75,7 @@ public sealed class DatabaseCurrentUserService : ICurrentUserService
 
         _userId = user.Id;
         _displayName = user.DisplayName;
-        _roles = user.UserRoles.Select(ur => ur.Role.Code).ToHashSet();
+        _roles = user.Roles.Select(r => (AppRole)r.Code).ToHashSet();
         _loaded = true;
     }
 }

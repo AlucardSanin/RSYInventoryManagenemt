@@ -37,11 +37,11 @@ SET IDENTITY_INSERT dbo.Zones ON;
 MERGE dbo.Zones AS target
 USING (VALUES
     (3, N'Zona Partes', 1, 2, 2, 1, CAST(N'2026-01-01T00:00:00' AS DATETIME2))
-) AS source (Id, Name, Purpose, RowCount, PalletsPerRow, IsActive, CreatedAtUtc)
+) AS source (Id, Name, Purpose, RowAmount, PalletsPerRow, IsActive, CreatedAtUtc)
 ON target.Id = source.Id
 WHEN NOT MATCHED THEN
-    INSERT (Id, Name, Purpose, RowCount, PalletsPerRow, IsActive, CreatedAtUtc)
-    VALUES (source.Id, source.Name, source.Purpose, source.RowCount, source.PalletsPerRow, source.IsActive, source.CreatedAtUtc);
+    INSERT (Id, Name, Purpose, RowAmount, PalletsPerRow, IsActive, CreatedAtUtc)
+    VALUES (source.Id, source.Name, source.Purpose, source.RowAmount, source.PalletsPerRow, source.IsActive, source.CreatedAtUtc);
 SET IDENTITY_INSERT dbo.Zones OFF;
 GO
 

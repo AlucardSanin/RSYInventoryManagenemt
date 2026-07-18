@@ -58,8 +58,8 @@ else
         <div class="border-bottom py-3">
             <h2 class="h5 mb-1">@zone.Name</h2>
             <p class="mb-2">
-                @(zone.Purpose == ZonePurpose.Parts ? "Partes" : "Vehículos")
-                · @zone.RowCount filas × @zone.PalletsPerRow paletas
+                @(zone.Purpose == (int)ZonePurpose.Parts ? "Partes" : "Vehículos")
+                · @zone.RowAmount filas × @zone.PalletsPerRow paletas
             </p>
             <div class="row g-2 align-items-end">
                 <div class="col-auto">
@@ -102,7 +102,7 @@ else
             _zones = await Layout.GetZonesAsync();
             foreach (var z in _zones)
             {
-                _resizeRows[z.Id] = z.RowCount;
+                _resizeRows[z.Id] = z.RowAmount;
                 _resizePallets[z.Id] = z.PalletsPerRow;
             }
         }

@@ -19,10 +19,11 @@ public class InventoryService
 
     public async Task<List<InventoryItem>> GetAvailableAsync(CancellationToken ct = default)
     {
+        var available = (int)InventoryItemStatus.Available;
         return await _db.InventoryItems
             .AsNoTracking()
             .Include(i => i.Pallet)!.ThenInclude(p => p!.Row)!.ThenInclude(r => r!.Zone)
-            .Where(i => i.Status == InventoryItemStatus.Available)
+            .Where(i => i.Status == available)
             .OrderByDescending(i => i.CreatedAtUtc)
             .ToListAsync(ct);
     }
@@ -51,8 +52,8 @@ public class InventoryService
 
         var item = new InventoryItem
         {
-            ItemType = itemType,
-            Status = InventoryItemStatus.Available,
+            ItemType = (int)itemType,
+            Status = (int)InventoryItemStatus.Available,
             PartNumber = partNumber,
             Brand = brand,
             Model = model,
@@ -68,7 +69,7 @@ public class InventoryService
 
         _db.InventoryMovements.Add(new InventoryMovement
         {
-            MovementType = MovementType.Assigned,
+            MovementType = (int)MovementType.Assigned,
             InventoryItemId = item.Id,
             ToPalletId = palletId,
             UserId = _currentUser.UserId,
@@ -95,7 +96,7 @@ public class InventoryService
         var item = await _db.InventoryItems.FirstOrDefaultAsync(i => i.Id == id, ct)
             ?? throw new InvalidOperationException("Pieza no encontrada.");
 
-        if (item.Status == InventoryItemStatus.Sold)
+        if (item.Status == (int)InventoryItemStatus.Sold)
             throw new InvalidOperationException("No se puede editar una pieza vendida.");
 
         item.PartNumber = partNumber;
@@ -127,20 +128,20 @@ public class InventoryService
         var item = await _db.InventoryItems.FirstOrDefaultAsync(i => i.Id == itemId, ct)
             ?? throw new InvalidOperationException("Pieza no encontrada.");
 
-        if (item.Status == InventoryItemStatus.Sold)
+        if (item.Status == (int)InventoryItemStatus.Sold)
             throw new InvalidOperationException("La pieza ya está vendida.");
 
         var fromPalletId = item.PalletId;
 
         if (movementType == MovementType.Sold)
         {
-            item.Status = InventoryItemStatus.Sold;
+            item.Status = (int)InventoryItemStatus.Sold;
             item.PalletId = null;
             item.UpdatedAtUtc = DateTime.UtcNow;
 
             _db.InventoryMovements.Add(new InventoryMovement
             {
-                MovementType = MovementType.Sold,
+                MovementType = (int)MovementType.Sold,
                 InventoryItemId = item.Id,
                 FromPalletId = fromPalletId,
                 ToPalletId = null,
@@ -157,14 +158,14 @@ public class InventoryService
             if (newPalletId == fromPalletId)
                 throw new InvalidOperationException("La paleta de destino es la misma.");
 
-            await EnsurePalletCanAcceptAsync(newPalletId.Value, item.ItemType, excludeItemId: item.Id, ct);
+            await EnsurePalletCanAcceptAsync(newPalletId.Value, (InventoryItemType)item.ItemType, excludeItemId: item.Id, ct);
 
             item.PalletId = newPalletId;
             item.UpdatedAtUtc = DateTime.UtcNow;
 
             _db.InventoryMovements.Add(new InventoryMovement
             {
-                MovementType = MovementType.Relocated,
+                MovementType = (int)MovementType.Relocated,
                 InventoryItemId = item.Id,
                 FromPalletId = fromPalletId,
                 ToPalletId = newPalletId,
@@ -216,18 +217,21 @@ public class InventoryService
             .FirstOrDefaultAsync(p => p.Id == palletId && p.IsActive, ct)
             ?? throw new InvalidOperationException("Paleta no encontrada o inactiva.");
 
-        if (pallet.Row.Zone.Purpose != ZonePurpose.Parts)
+        if (pallet.Row.Zone.Purpose != (int)ZonePurpose.Parts)
             throw new InvalidOperationException("Solo se pueden colocar motores/transmisiones en zonas de partes.");
 
+        var available = (int)InventoryItemStatus.Available;
         var query = _db.InventoryItems.Where(i =>
             i.PalletId == palletId &&
-            i.Status == InventoryItemStatus.Available);
+            i.Status == available);
 
         if (excludeItemId is not null)
             query = query.Where(i => i.Id != excludeItemId);
 
-        var engines = await query.CountAsync(i => i.ItemType == InventoryItemType.Engine, ct);
-        var transmissions = await query.CountAsync(i => i.ItemType == InventoryItemType.Transmission, ct);
+        var engine = (int)InventoryItemType.Engine;
+        var transmission = (int)InventoryItemType.Transmission;
+        var engines = await query.CountAsync(i => i.ItemType == engine, ct);
+        var transmissions = await query.CountAsync(i => i.ItemType == transmission, ct);
 
         if (!PalletCapacityRules.CanPlace(itemType, engines, transmissions))
         {

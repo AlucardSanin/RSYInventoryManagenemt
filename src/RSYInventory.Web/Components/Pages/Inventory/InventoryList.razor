@@ -45,7 +45,7 @@ else
             @foreach (var item in _items)
             {
                 <tr>
-                    <td>@(item.ItemType == InventoryItemType.Engine ? "Motor" : "Transmisión")</td>
+                    <td>@(item.ItemType == (int)InventoryItemType.Engine ? "Motor" : "Transmisión")</td>
                     <td>@(item.Brand) @(item.Model)</td>
                     <td>@(item.Year?.ToString() ?? "—")</td>
                     <td>@FormatLocation(item)</td>
