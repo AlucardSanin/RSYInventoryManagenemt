@@ -19,3 +19,15 @@ This folder holds the SQL Server scripts that define and evolve the yard invento
 ```
 Server=.\MSSQLSERVER01;Database=RSYYardInventory;Trusted_Connection=True;TrustServerCertificate=True;
 ```
+
+## Scaffold (importar modelos desde la BD)
+
+Comando guardado también en `scaffold-command.txt`. Desde la raíz del repo:
+
+```powershell
+dotnet tool install --global dotnet-ef
+
+dotnet ef dbcontext scaffold "Server=.\MSSQLSERVER01;Database=RSYYardInventory;Trusted_Connection=True;TrustServerCertificate=True;" Microsoft.EntityFrameworkCore.SqlServer --project src/RSYInventory.Data/RSYInventory.Data.csproj --startup-project src/RSYInventory.Web/RSYInventory.Web.csproj --context YardInventoryDbContext --context-dir Data --output-dir Entities --namespace RSYInventory.Data.Entities --context-namespace RSYInventory.Data.Data --no-onconfiguring --force
+```
+
+`--force` sobrescribe `Entities/` y `Data/YardInventoryDbContext.cs`.
