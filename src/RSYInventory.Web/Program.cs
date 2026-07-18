@@ -6,9 +6,10 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-// Connection string name: YardInventory
-// - Development: appsettings.Development.json → local RSYYardInventory
-// - Production:  appsettings.Production.json → server remoto (cámbialo cuando toque)
+// ConnectionStrings:YardInventory
+// - Development → instancia local (.\MSSQLSERVER01 / RSYYardInventory)
+// - Production  → servidor remoto (appsettings.Production.json)
+// El esquema NO se crea desde la app: usa resources/Database/*.sql en SSMS.
 var connectionString = builder.Configuration.GetConnectionString("YardInventory")
     ?? throw new InvalidOperationException(
         "Falta ConnectionStrings:YardInventory. Configúrala en appsettings / User Secrets.");
@@ -16,9 +17,6 @@ var connectionString = builder.Configuration.GetConnectionString("YardInventory"
 builder.Services.AddYardInventoryData(connectionString);
 
 var app = builder.Build();
-
-// Crea tablas si la BD está vacía y asegura roles/usuario/zonas/fuentes EN SQL Server.
-await app.Services.InitializeYardInventoryDatabaseAsync();
 
 if (!app.Environment.IsDevelopment())
 {

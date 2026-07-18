@@ -9,18 +9,13 @@ This folder holds the SQL Server scripts that define and evolve the yard invento
 
 ## Workflow
 
-1. Apply scripts in order with SQL Server Management Studio (SSMS) against database `RSYYardInventory` (or your chosen name).
-2. When you change the schema (new column, table, constraint), update the corresponding script **and** the EF models in `src/RSYInventory.Data`.
-3. Prefer additive numbered scripts (`002_...sql`, `003_...sql`) for later changes so the full history can rebuild an empty database.
+1. Create the database yourself in SSMS (the app never calls `EnsureCreated`).
+2. Apply scripts in order against `RSYYardInventory`.
+3. When the schema changes, add a new numbered script (`003_...sql`, etc.) **and** update EF models in `src/RSYInventory.Data`.
+4. This folder is the source of truth for recreating / evolving the architecture.
 
-## Connection string (example)
-
-```
-Server=localhost;Database=RSYYardInventory;Trusted_Connection=True;TrustServerCertificate=True;
-```
-
-For SQL authentication:
+## Connection string (local example)
 
 ```
-Server=localhost;Database=RSYYardInventory;User Id=sa;Password=YourPassword;TrustServerCertificate=True;
+Server=.\MSSQLSERVER01;Database=RSYYardInventory;Trusted_Connection=True;TrustServerCertificate=True;
 ```

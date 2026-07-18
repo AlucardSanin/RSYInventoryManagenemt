@@ -71,8 +71,8 @@ public sealed class DatabaseCurrentUserService : ICurrentUserService
                 .ThenInclude(ur => ur.Role)
             .FirstOrDefault(u => u.UserName == _userName && u.IsActive)
             ?? throw new InvalidOperationException(
-                $"Usuario '{_userName}' no encontrado en la base de datos RSYYardInventory. " +
-                "Ejecuta los scripts SQL o deja que el seeder de arranque lo cree.");
+                $"Usuario '{_userName}' no encontrado en RSYYardInventory. " +
+                "Aplica resources/Database/*.sql en SSMS (p. ej. 002_DemoUserAndPartsZone.sql).");
 
         _userId = user.Id;
         _displayName = user.DisplayName;

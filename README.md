@@ -22,17 +22,17 @@ git pull origin cursor/yard-inventory-foundation-a4a6
 ```
 
 1. Abre `RSYInventory.slnx` en Visual Studio 2022.
-2. Ten creada la BD local **`RSYYardInventory`** (ya la tienes).
+2. BD local ya creada: **`RSYYardInventory`** en `.\MSSQLSERVER01`.
 3. Connection string (solo cambias esto al pasar al servidor):
    - **Local (Development):** `src/RSYInventory.Web/appsettings.Development.json`
      ```
-     Server=localhost;Database=RSYYardInventory;Trusted_Connection=True;TrustServerCertificate=True;
+     Server=.\MSSQLSERVER01;Database=RSYYardInventory;Trusted_Connection=True;TrustServerCertificate=True;
      ```
    - **Servidor (Production):** `src/RSYInventory.Web/appsettings.Production.json`
-4. Al arrancar, la app escribe en SQL los datos de referencia si faltan (roles, fuentes, Zona A/B/Partes, usuario `demo`). También puedes aplicar `resources/Database/*.sql` en SSMS.
+4. Esquema y datos de referencia: aplica `resources/Database/*.sql` en SSMS. La app **no** llama a `EnsureCreated` ni crea la BD.
 5. Proyecto de inicio: `RSYInventory.Web` → F5.
 
-El usuario actual se lee **desde la tabla `Users`** (`App:CurrentUserName` = `demo`), no está hardcodeado en memoria.
+El usuario actual se lee **desde la tabla `Users`** (`App:CurrentUserName` = `demo`).
 
 ## Pantallas web (ya disponibles)
 
