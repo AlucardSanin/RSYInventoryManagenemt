@@ -90,13 +90,13 @@ BEGIN
         Id            INT            NOT NULL IDENTITY(1,1) CONSTRAINT PK_Zones PRIMARY KEY,
         Name          NVARCHAR(100)  NOT NULL,
         Purpose       INT            NOT NULL, -- ZonePurpose enum
-        RowCount      INT            NOT NULL,
+        RowAmount      INT            NOT NULL,
         PalletsPerRow INT            NOT NULL,
         IsActive      BIT            NOT NULL CONSTRAINT DF_Zones_IsActive DEFAULT (1),
         CreatedAtUtc  DATETIME2(7)   NOT NULL CONSTRAINT DF_Zones_CreatedAtUtc DEFAULT (SYSUTCDATETIME()),
         UpdatedAtUtc  DATETIME2(7)   NULL,
         CONSTRAINT UQ_Zones_Name_Purpose UNIQUE (Name, Purpose),
-        CONSTRAINT CK_Zones_RowCount CHECK (RowCount >= 0),
+        CONSTRAINT CK_Zones_RowAmount CHECK (RowAmount >= 0),
         CONSTRAINT CK_Zones_PalletsPerRow CHECK (PalletsPerRow >= 0)
     );
 END
@@ -274,11 +274,11 @@ MERGE dbo.Zones AS target
 USING (VALUES
     (1, N'Zona A', 2, 2, 2, 1, CAST(N'2026-01-01T00:00:00' AS DATETIME2)),
     (2, N'Zona B', 2, 2, 2, 1, CAST(N'2026-01-01T00:00:00' AS DATETIME2))
-) AS source (Id, Name, Purpose, RowCount, PalletsPerRow, IsActive, CreatedAtUtc)
+) AS source (Id, Name, Purpose, RowAmount, PalletsPerRow, IsActive, CreatedAtUtc)
 ON target.Id = source.Id
 WHEN NOT MATCHED THEN
-    INSERT (Id, Name, Purpose, RowCount, PalletsPerRow, IsActive, CreatedAtUtc)
-    VALUES (source.Id, source.Name, source.Purpose, source.RowCount, source.PalletsPerRow, source.IsActive, source.CreatedAtUtc);
+    INSERT (Id, Name, Purpose, RowAmount, PalletsPerRow, IsActive, CreatedAtUtc)
+    VALUES (source.Id, source.Name, source.Purpose, source.RowAmount, source.PalletsPerRow, source.IsActive, source.CreatedAtUtc);
 SET IDENTITY_INSERT dbo.Zones OFF;
 GO
 

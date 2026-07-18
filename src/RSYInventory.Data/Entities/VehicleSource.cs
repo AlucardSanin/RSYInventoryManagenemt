@@ -1,13 +1,15 @@
+﻿using System;
+using System.Collections.Generic;
+
 namespace RSYInventory.Data.Entities;
 
-/// <summary>
-/// Acquisition channel (Wheelzy, Pebble, Facebook, etc.).
-/// </summary>
-public class VehicleSource
+public partial class VehicleSource
 {
     public int Id { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public bool IsActive { get; set; } = true;
 
-    public ICollection<Vehicle> Vehicles { get; set; } = new List<Vehicle>();
+    public string Name { get; set; } = null!;
+
+    public bool IsActive { get; set; }
+
+    public virtual ICollection<Vehicle> Vehicles { get; set; } = new List<Vehicle>();
 }

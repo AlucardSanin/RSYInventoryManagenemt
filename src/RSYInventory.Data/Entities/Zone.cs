@@ -1,21 +1,25 @@
-using RSYInventory.Data.Enums;
+﻿using System;
+using System.Collections.Generic;
 
 namespace RSYInventory.Data.Entities;
 
-/// <summary>
-/// Yard zone. Rows and pallets are flexible: configured via RowCount and PalletsPerRow
-/// and materialized as Row/Pallet children when a ZoneManager creates or edits the zone.
-/// </summary>
-public class Zone
+public partial class Zone
 {
     public int Id { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public ZonePurpose Purpose { get; set; }
-    public int RowCount { get; set; }
+
+    public string Name { get; set; } = null!;
+
+    public int Purpose { get; set; }
+
+    public int RowAmount { get; set; }
+
     public int PalletsPerRow { get; set; }
-    public bool IsActive { get; set; } = true;
-    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+
+    public bool IsActive { get; set; }
+
+    public DateTime CreatedAtUtc { get; set; }
+
     public DateTime? UpdatedAtUtc { get; set; }
 
-    public ICollection<Row> Rows { get; set; } = new List<Row>();
+    public virtual ICollection<Row> Rows { get; set; } = new List<Row>();
 }
