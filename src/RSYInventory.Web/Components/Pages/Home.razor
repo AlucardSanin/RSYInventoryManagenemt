@@ -1,0 +1,46 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@using RSYInventory.Data.Services
+@inject ICurrentUserService CurrentUser
+@inject IConfiguration Config
+
+<PageTitle>RSY Yard Inventory</PageTitle>
+
+<h1>RSY Yard Inventory</h1>
+
+<p>Inventario de motores, transmisiones y vehículos entrantes.</p>
+
+<ul>
+    <li><a href="inventory">Inventario</a> — motores y transmisiones por paleta</li>
+    <li><a href="vehicles">Vehículos</a> — adquisición y asignación de ubicación</li>
+    <li><a href="zones">Zonas</a> — filas y paletas (partes y vehículos)</li>
+</ul>
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else
+{
+    <p class="text-muted">
+        BD existente: <code>RSYYardInventory</code> (esquema vía scripts SQL)
+        · Usuario (tabla Users): <strong>@_userLabel</strong>
+    </p>
+}
+
+@code {
+    private string? _error;
+    private string _userLabel = "…";
+
+    protected override void OnInitialized()
+    {
+        try
+        {
+            _userLabel = $"{CurrentUser.DisplayName} (id {CurrentUser.UserId}, config user '{Config["App:CurrentUserName"]}')";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+}

@@ -1,0 +1,15 @@
+# Scaffold EF Core desde la BD existente
+# Requisito una vez: dotnet tool install --global dotnet-ef
+#
+# IMPORTANTE: ejecuta desde la RAÍZ del repo
+#   (donde está RSYInventory.slnx), NO desde src\RSYInventory.Data
+#
+#   cd C:\Users\david\source\repos\AlucardSanin\RSYInventoryManagememt
+#
+# Si ya estás dentro de src\RSYInventory.Data, usa la variante B.
+
+# --- Variante A (recomendado): desde la raíz del repo ---
+dotnet ef dbcontext scaffold "Server=.\\MSSQLSERVER01;Database=RSYYardInventory;Trusted_Connection=True;TrustServerCertificate=True;" Microsoft.EntityFrameworkCore.SqlServer --project src/RSYInventory.Data/RSYInventory.Data.csproj --startup-project src/RSYInventory.Web/RSYInventory.Web.csproj --context YardInventoryDbContext --context-dir Data --output-dir Entities --namespace RSYInventory.Data.Entities --context-namespace RSYInventory.Data.Data --no-onconfiguring --force
+
+# --- Variante B: si tu cwd es src\RSYInventory.Data ---
+# dotnet ef dbcontext scaffold "Server=.\\MSSQLSERVER01;Database=RSYYardInventory;Trusted_Connection=True;TrustServerCertificate=True;" Microsoft.EntityFrameworkCore.SqlServer --project .\RSYInventory.Data.csproj --startup-project ..\RSYInventory.Web\RSYInventory.Web.csproj --context YardInventoryDbContext --context-dir Data --output-dir Entities --namespace RSYInventory.Data.Entities --context-namespace RSYInventory.Data.Data --no-onconfiguring --force

@@ -1,0 +1,83 @@
+@page "/pallets/{PalletId:int}/movements"
+@rendermode InteractiveServer
+@using RSYInventory.Data.Entities
+@using RSYInventory.Data.Enums
+@using RSYInventory.Data.Services
+@inject InventoryService Inventory
+
+<PageTitle>Historial de paleta</PageTitle>
+
+<h1>Últimos movimientos de la paleta #@PalletId</h1>
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else if (_movements is null)
+{
+    <p>Cargando…</p>
+}
+else if (_movements.Count == 0)
+{
+    <p>Sin movimientos registrados.</p>
+}
+else
+{
+    <table class="table table-sm table-striped">
+        <thead>
+            <tr>
+                <th>Fecha (UTC)</th>
+                <th>Usuario</th>
+                <th>Tipo</th>
+                <th>Detalle</th>
+                <th>Notas</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var m in _movements)
+            {
+                <tr>
+                    <td>@m.MovedAtUtc.ToString("yyyy-MM-dd HH:mm")</td>
+                    <td>@m.User.DisplayName</td>
+                    <td>@((MovementType)m.MovementType)</td>
+                    <td>
+                        @if (m.InventoryItem is not null)
+                        {
+                            <span>@((InventoryItemType)m.InventoryItem.ItemType) #@m.InventoryItemId</span>
+                        }
+                        else if (m.Vehicle is not null)
+                        {
+                            <span>VIN @m.Vehicle.Vin</span>
+                        }
+                        <br />
+                        <small class="text-muted">
+                            @(m.FromPalletId?.ToString() ?? "—") → @(m.ToPalletId?.ToString() ?? "—")
+                        </small>
+                    </td>
+                    <td>@m.Notes</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<p><a href="inventory">Volver al inventario</a></p>
+
+@code {
+    [Parameter] public int PalletId { get; set; }
+
+    private List<InventoryMovement>? _movements;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _movements = await Inventory.GetPalletMovementsAsync(PalletId);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+}

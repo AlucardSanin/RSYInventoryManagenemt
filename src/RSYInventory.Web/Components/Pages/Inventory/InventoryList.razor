@@ -1,0 +1,86 @@
+@page "/inventory"
+@rendermode InteractiveServer
+@using RSYInventory.Data.Entities
+@using RSYInventory.Data.Enums
+@using RSYInventory.Data.Services
+@inject InventoryService Inventory
+@inject YardLayoutService Layout
+@inject NavigationManager Nav
+
+<PageTitle>Inventario</PageTitle>
+
+<h1>Inventario (motores y transmisiones)</h1>
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+<div class="mb-3 d-flex gap-2">
+    <a class="btn btn-primary" href="inventory/new">Añadir pieza</a>
+    <a class="btn btn-outline-secondary" href="zones">Zonas</a>
+</div>
+
+@if (_items is null)
+{
+    <p>Cargando…</p>
+}
+else if (_items.Count == 0)
+{
+    <p>No hay piezas disponibles. Añade un motor o transmisión.</p>
+}
+else
+{
+    <table class="table table-striped table-sm align-middle">
+        <thead>
+            <tr>
+                <th>Tipo</th>
+                <th>Marca / Modelo</th>
+                <th>Año</th>
+                <th>Ubicación</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var item in _items)
+            {
+                <tr>
+                    <td>@(item.ItemType == (int)InventoryItemType.Engine ? "Motor" : "Transmisión")</td>
+                    <td>@(item.Brand) @(item.Model)</td>
+                    <td>@(item.Year?.ToString() ?? "—")</td>
+                    <td>@FormatLocation(item)</td>
+                    <td class="text-end">
+                        <a class="btn btn-sm btn-outline-primary" href="@($"inventory/{item.Id}/move")">Mover / Vender</a>
+                        @if (item.PalletId is not null)
+                        {
+                            <a class="btn btn-sm btn-outline-secondary" href="@($"pallets/{item.PalletId}/movements")">Historial paleta</a>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<InventoryItem>? _items;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _items = await Inventory.GetAvailableAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message + " — ¿Ejecutaste los scripts SQL y configuraste la connection string?";
+        }
+    }
+
+    private static string FormatLocation(InventoryItem item)
+    {
+        if (item.Pallet is null) return "Sin ubicación";
+        return YardLayoutService.FormatPalletLabel(item.Pallet);
+    }
+}
