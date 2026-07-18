@@ -1,0 +1,101 @@
+@page "/vehicles/{Id:int}/assign"
+@rendermode InteractiveServer
+@using RSYInventory.Data.Entities
+@using RSYInventory.Data.Enums
+@using RSYInventory.Data.Services
+@inject VehicleService Vehicles
+@inject YardLayoutService Layout
+@inject NavigationManager Nav
+
+<PageTitle>Asignar ubicación</PageTitle>
+
+<h1>Asignar ubicación a vehículo</h1>
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+@if (_vehicle is null && string.IsNullOrEmpty(_error))
+{
+    <p>Cargando…</p>
+}
+else if (_vehicle is not null)
+{
+    <p>
+        VIN <code>@_vehicle.Vin</code> — @_vehicle.Year @_vehicle.Make @_vehicle.Model
+        <br />
+        Ubicación actual:
+        @(_vehicle.Pallet is null ? "Sin ubicar" : YardLayoutService.FormatPalletLabel(_vehicle.Pallet))
+    </p>
+
+    <div class="mb-3">
+        <label class="form-label">Paleta (zonas de vehículos)</label>
+        <select class="form-select" @bind="_palletId">
+            <option value="0">— seleccionar —</option>
+            @foreach (var p in _pallets)
+            {
+                <option value="@p.Id">@YardLayoutService.FormatPalletLabel(p)</option>
+            }
+        </select>
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Notas</label>
+        <input class="form-control" @bind="_notes" />
+    </div>
+    <button class="btn btn-primary" disabled="@_saving" @onclick="SaveAsync">Guardar ubicación</button>
+    <a class="btn btn-link" href="vehicles">Cancelar</a>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private Vehicle? _vehicle;
+    private List<Pallet> _pallets = [];
+    private int _palletId;
+    private string? _notes;
+    private string? _error;
+    private bool _saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _vehicle = await Vehicles.GetByIdAsync(Id);
+            if (_vehicle is null)
+            {
+                _error = "Vehículo no encontrado.";
+                return;
+            }
+
+            _pallets = await Layout.GetPalletsAsync(ZonePurpose.Vehicles);
+            _palletId = _vehicle.PalletId ?? 0;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        _saving = true;
+        try
+        {
+            if (_palletId <= 0)
+                throw new InvalidOperationException("Seleccione una paleta.");
+
+            await Vehicles.AssignLocationAsync(Id, _palletId, _notes);
+            Nav.NavigateTo("vehicles");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

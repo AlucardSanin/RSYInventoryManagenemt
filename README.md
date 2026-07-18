@@ -11,57 +11,48 @@ Aplicación híbrida para inventario de motores, transmisiones y vehículos entr
 
 Solución: `RSYInventory.slnx`
 
-## Primeros pasos
+## Depurar en Visual Studio (tu PC)
 
-### 1. Base de datos (SSMS)
+El agente Cloud empuja cambios a GitHub; en tu máquina solo tienes que actualizar la rama:
 
-1. Crea la base `RSYYardInventory` en SQL Server.
-2. Ejecuta `resources/Database/001_InitialSchema.sql`.
-3. Ajusta la connection string en `src/RSYInventory.Web/appsettings.json`.
+```powershell
+git fetch origin
+git checkout cursor/yard-inventory-foundation-a4a6
+git pull origin cursor/yard-inventory-foundation-a4a6
+```
 
-### 2. Web (rápido para empezar a usar)
+1. Abre `RSYInventory.slnx` en Visual Studio 2022.
+2. En SSMS, crea la BD `RSYYardInventory` y ejecuta en orden:
+   - `resources/Database/001_InitialSchema.sql`
+   - `resources/Database/002_DemoUserAndPartsZone.sql`
+3. Ajusta la connection string si no usas LocalDB:
+   - Dev: `src/RSYInventory.Web/appsettings.Development.json` → `(localdb)\MSSQLLocalDB`
+   - O tu instancia SQL: `Server=localhost;Database=RSYYardInventory;Trusted_Connection=True;TrustServerCertificate=True;`
+4. Establece `RSYInventory.Web` como proyecto de inicio y pulsa F5.
+
+Repo: https://github.com/AlucardSanin/RSYInventoryManagenemt  
+PR: https://github.com/AlucardSanin/RSYInventoryManagenemt/pull/1
+
+## Pantallas web (ya disponibles)
+
+- `/inventory` — listar / añadir motores y transmisiones
+- `/inventory/{id}/move` — preguntar Vendido vs Reubicado + historial
+- `/vehicles` — listado; `/vehicles/acquire` — alta con VIN (auto-relleno básico)
+- `/vehicles/{id}/assign` — ubicar en Zona A / B (u otras zonas de vehículos)
+- `/zones` — crear / redimensionar / eliminar zonas (bloquea si hay inventario)
+- `/pallets/{id}/movements` — últimos movimientos por paleta y usuario
+
+## Primeros pasos (CLI)
 
 ```bash
 dotnet restore RSYInventory.slnx
 dotnet run --project src/RSYInventory.Web
 ```
 
-### 3. Móvil (Android / iOS)
-
-```bash
-# Android (Linux/macOS/Windows con workload maui-android)
-dotnet build src/RSYInventory.Mobile -f net9.0-android
-
-# iOS requiere macOS + workload maui-ios
-dotnet build src/RSYInventory.Mobile -f net9.0-ios
-```
-
-### 4. Entity Framework (migraciones opcionales)
-
-Los modelos están en `RSYInventory.Data`. El esquema canónico para recrear la BD es el SQL en `resources/Database`. Si usas migraciones EF:
-
-```bash
-dotnet ef migrations add InitialCreate --project src/RSYInventory.Data --startup-project src/RSYInventory.Web
-```
-
 ## Modelo de negocio (resumen)
 
-- **Roles**: Viewer (solo ver), Inventory Editor (CRUD inventario + ubicar vehículos), Zone Manager (crear/editar zonas), Vehicle Acquirer (registrar compras).
-- **Layout**: Zona → Fila → Paleta. Filas y paletas son flexibles al crear/editar una zona.
-- **Paleta (partes)**: máximo 1 motor, máximo 2 transmisiones; motor + transmisión permitido.
-- **Vehículos**: VIN, año, marca, modelo, tipo de transmisión + drivetrain (2 combobox), km, observaciones, fuente (Wheelzy, Pebble, Facebook…), fecha de adquisición. La ubicación se asigna después.
-- **Zonas por defecto (vehículos)**: Zona A y Zona B.
-- **Reglas**: no eliminar zona/fila/paleta con inventario; al cambiar ubicación preguntar Vendido vs Reubicado; historial en `InventoryMovements`.
-
-## Estructura
-
-```
-RSYInventory.slnx
-src/
-  RSYInventory.Data/       # Entidades, DbContext, reglas de capacidad
-  RSYInventory.Web/        # Blazor web
-  RSYInventory.Mobile/     # MAUI Blazor Hybrid
-resources/
-  Database/
-    001_InitialSchema.sql  # Arquitectura SQL (actualizar al evolucionar)
-```
+- **Roles**: Viewer, Inventory Editor, Zone Manager, Vehicle Acquirer (usuario demo tiene todos).
+- **Layout**: Zona → Fila → Paleta.
+- **Paleta (partes)**: máximo 1 motor, máximo 2 transmisiones; motor + transmisión OK.
+- **Vehículos**: VIN, año, marca/modelo, transmisión + drivetrain, km, observaciones, fuente, fecha; ubicación después.
+- **Reglas**: no eliminar zona/fila/paleta con inventario; al mover pieza → Vendido o Reubicado; log en `InventoryMovements`.

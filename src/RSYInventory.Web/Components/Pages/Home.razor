@@ -4,13 +4,16 @@
 
 <h1>RSY Yard Inventory</h1>
 
-<p>
-    Inventario de motores, transmisiones y vehículos entrantes.
-    Usa Blazor en la web; la app MAUI Blazor Hybrid comparte el mismo modelo de datos.
-</p>
+<p>Inventario de motores, transmisiones y vehículos entrantes.</p>
 
 <ul>
-    <li>Roles: visualización, edición de inventario, gestión de zonas, adquisición de vehículos</li>
-    <li>Ubicación: Zona → Fila → Paleta</li>
-    <li>Historial de movimientos (vendido / reubicado)</li>
+    <li><a href="inventory">Inventario</a> — motores y transmisiones por paleta</li>
+    <li><a href="vehicles">Vehículos</a> — adquisición y asignación de ubicación</li>
+    <li><a href="zones">Zonas</a> — filas y paletas (partes y vehículos)</li>
 </ul>
+
+<p class="text-muted">
+    Usuario demo (debug): Demo Admin. Configura SQL Server / LocalDB y ejecuta
+    <code>resources/Database/001_InitialSchema.sql</code> y
+    <code>002_DemoUserAndPartsZone.sql</code>.
+</p>

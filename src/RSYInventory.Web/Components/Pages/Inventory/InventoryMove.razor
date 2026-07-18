@@ -1,0 +1,120 @@
+@page "/inventory/{Id:int}/move"
+@rendermode InteractiveServer
+@using RSYInventory.Data.Entities
+@using RSYInventory.Data.Enums
+@using RSYInventory.Data.Services
+@inject InventoryService Inventory
+@inject YardLayoutService Layout
+@inject NavigationManager Nav
+
+<PageTitle>Mover / Vender</PageTitle>
+
+<h1>Cambiar ubicación</h1>
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+@if (_item is null && string.IsNullOrEmpty(_error))
+{
+    <p>Cargando…</p>
+}
+else if (_item is not null)
+{
+    <p>
+        <strong>@(_item.ItemType == InventoryItemType.Engine ? "Motor" : "Transmisión")</strong>
+        @_item.Brand @_item.Model
+        <br />
+        Ubicación actual: @(_item.Pallet is null ? "—" : YardLayoutService.FormatPalletLabel(_item.Pallet))
+    </p>
+
+    <div class="alert alert-warning">
+        ¿La pieza fue <strong>vendida</strong> o solo se está <strong>reubicando</strong>?
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">Acción</label>
+        <select class="form-select" @bind="_movementType">
+            <option value="@MovementType.Relocated">Solo reubicar</option>
+            <option value="@MovementType.Sold">Vendido</option>
+        </select>
+    </div>
+
+    @if (_movementType == MovementType.Relocated)
+    {
+        <div class="mb-3">
+            <label class="form-label">Nueva paleta</label>
+            <select class="form-select" @bind="_newPalletId">
+                <option value="0">— seleccionar —</option>
+                @foreach (var p in _pallets)
+                {
+                    <option value="@p.Id">@YardLayoutService.FormatPalletLabel(p)</option>
+                }
+            </select>
+        </div>
+    }
+
+    <div class="mb-3">
+        <label class="form-label">Notas</label>
+        <input class="form-control" @bind="_notes" />
+    </div>
+
+    <button class="btn btn-primary" disabled="@_saving" @onclick="ConfirmAsync">Confirmar</button>
+    <a class="btn btn-link" href="inventory">Cancelar</a>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private InventoryItem? _item;
+    private List<Pallet> _pallets = [];
+    private MovementType _movementType = MovementType.Relocated;
+    private int _newPalletId;
+    private string? _notes;
+    private string? _error;
+    private bool _saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _item = await Inventory.GetByIdAsync(Id);
+            if (_item is null)
+            {
+                _error = "Pieza no encontrada.";
+                return;
+            }
+
+            _pallets = await Layout.GetPalletsAsync(ZonePurpose.Parts);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task ConfirmAsync()
+    {
+        _error = null;
+        _saving = true;
+        try
+        {
+            await Inventory.ChangeLocationAsync(
+                Id,
+                _movementType,
+                _movementType == MovementType.Relocated ? _newPalletId : null,
+                _notes);
+
+            Nav.NavigateTo("inventory");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

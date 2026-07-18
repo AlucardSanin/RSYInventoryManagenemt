@@ -202,7 +202,27 @@ public class YardInventoryDbContext : DbContext
             new VehicleSource { Id = 4, Name = "Other", IsActive = true }
         );
 
-        // Default vehicle zones: Zona A and Zona B (flexible rows/pallets; start with 2x2 placeholders).
+        // Demo user for Visual Studio / local debugging (matches DevCurrentUserService.UserId = 1).
+        modelBuilder.Entity<User>().HasData(
+            new User
+            {
+                Id = 1,
+                UserName = "demo",
+                DisplayName = "Demo Admin",
+                Email = "demo@rsy.local",
+                IsActive = true,
+                CreatedAtUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            }
+        );
+
+        modelBuilder.Entity<UserRole>().HasData(
+            new UserRole { UserId = 1, RoleId = 1 },
+            new UserRole { UserId = 1, RoleId = 2 },
+            new UserRole { UserId = 1, RoleId = 3 },
+            new UserRole { UserId = 1, RoleId = 4 }
+        );
+
+        // Default vehicle zones: Zona A and Zona B + one parts zone for engines/transmissions.
         modelBuilder.Entity<Zone>().HasData(
             new Zone
             {
@@ -223,6 +243,16 @@ public class YardInventoryDbContext : DbContext
                 PalletsPerRow = 2,
                 IsActive = true,
                 CreatedAtUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+            },
+            new Zone
+            {
+                Id = 3,
+                Name = "Zona Partes",
+                Purpose = ZonePurpose.Parts,
+                RowCount = 2,
+                PalletsPerRow = 2,
+                IsActive = true,
+                CreatedAtUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
             }
         );
 
@@ -230,7 +260,9 @@ public class YardInventoryDbContext : DbContext
             new Row { Id = 1, ZoneId = 1, RowNumber = 1, Label = "A-R1", IsActive = true },
             new Row { Id = 2, ZoneId = 1, RowNumber = 2, Label = "A-R2", IsActive = true },
             new Row { Id = 3, ZoneId = 2, RowNumber = 1, Label = "B-R1", IsActive = true },
-            new Row { Id = 4, ZoneId = 2, RowNumber = 2, Label = "B-R2", IsActive = true }
+            new Row { Id = 4, ZoneId = 2, RowNumber = 2, Label = "B-R2", IsActive = true },
+            new Row { Id = 5, ZoneId = 3, RowNumber = 1, Label = "P-R1", IsActive = true },
+            new Row { Id = 6, ZoneId = 3, RowNumber = 2, Label = "P-R2", IsActive = true }
         );
 
         modelBuilder.Entity<Pallet>().HasData(
@@ -241,7 +273,11 @@ public class YardInventoryDbContext : DbContext
             new Pallet { Id = 5, RowId = 3, PalletNumber = 1, Label = "B-R1-P1", IsActive = true },
             new Pallet { Id = 6, RowId = 3, PalletNumber = 2, Label = "B-R1-P2", IsActive = true },
             new Pallet { Id = 7, RowId = 4, PalletNumber = 1, Label = "B-R2-P1", IsActive = true },
-            new Pallet { Id = 8, RowId = 4, PalletNumber = 2, Label = "B-R2-P2", IsActive = true }
+            new Pallet { Id = 8, RowId = 4, PalletNumber = 2, Label = "B-R2-P2", IsActive = true },
+            new Pallet { Id = 9, RowId = 5, PalletNumber = 1, Label = "P-R1-P1", IsActive = true },
+            new Pallet { Id = 10, RowId = 5, PalletNumber = 2, Label = "P-R1-P2", IsActive = true },
+            new Pallet { Id = 11, RowId = 6, PalletNumber = 1, Label = "P-R2-P1", IsActive = true },
+            new Pallet { Id = 12, RowId = 6, PalletNumber = 2, Label = "P-R2-P2", IsActive = true }
         );
     }
 }

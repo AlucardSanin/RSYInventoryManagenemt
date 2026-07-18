@@ -1,5 +1,4 @@
-using Microsoft.EntityFrameworkCore;
-using RSYInventory.Data.Data;
+using RSYInventory.Data;
 using RSYInventory.Web.Components;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -7,8 +6,10 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-builder.Services.AddDbContext<YardInventoryDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("YardInventory")));
+var connectionString = builder.Configuration.GetConnectionString("YardInventory")
+    ?? throw new InvalidOperationException("Connection string 'YardInventory' not found.");
+
+builder.Services.AddYardInventoryData(connectionString);
 
 var app = builder.Build();
 

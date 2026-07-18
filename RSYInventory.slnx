@@ -6,6 +6,7 @@
   </Folder>
   <Folder Name="/resources/">
     <File Path="resources/Database/001_InitialSchema.sql" />
+    <File Path="resources/Database/002_DemoUserAndPartsZone.sql" />
     <File Path="resources/Database/README.md" />
   </Folder>
 </Solution>

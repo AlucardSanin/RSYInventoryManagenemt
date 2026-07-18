@@ -1,0 +1,167 @@
+@page "/vehicles/acquire"
+@rendermode InteractiveServer
+@using RSYInventory.Data.Entities
+@using RSYInventory.Data.Enums
+@using RSYInventory.Data.Services
+@inject VehicleService Vehicles
+@inject NavigationManager Nav
+
+<PageTitle>Adquirir vehículo</PageTitle>
+
+<h1>Registrar vehículo adquirido</h1>
+<p class="text-muted">Este usuario no asigna espacio en la yarda; solo registra la compra.</p>
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+@if (!string.IsNullOrEmpty(_info))
+{
+    <div class="alert alert-info">@_info</div>
+}
+
+<EditForm Model="_model" OnValidSubmit="SaveAsync">
+    <div class="mb-3">
+        <label class="form-label">VIN</label>
+        <InputText class="form-control" @bind-Value="_model.Vin" @bind-Value:after="OnVinChanged" maxlength="17" />
+        <div class="form-text">Si es posible, se rellenan año y marca automáticamente.</div>
+    </div>
+    <div class="row">
+        <div class="col-md-3 mb-3">
+            <label class="form-label">Año</label>
+            <InputNumber class="form-control" @bind-Value="_model.Year" />
+        </div>
+        <div class="col-md-3 mb-3">
+            <label class="form-label">Marca</label>
+            <InputText class="form-control" @bind-Value="_model.Make" />
+        </div>
+        <div class="col-md-3 mb-3">
+            <label class="form-label">Modelo</label>
+            <InputText class="form-control" @bind-Value="_model.Model" />
+        </div>
+        <div class="col-md-3 mb-3">
+            <label class="form-label">Kilometraje</label>
+            <InputNumber class="form-control" @bind-Value="_model.Mileage" />
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-4 mb-3">
+            <label class="form-label">Tipo de transmisión</label>
+            <InputSelect class="form-select" @bind-Value="_model.TransmissionType">
+                <option value="">—</option>
+                <option value="@TransmissionType.Automatic">Automática</option>
+                <option value="@TransmissionType.Manual">Manual</option>
+            </InputSelect>
+        </div>
+        <div class="col-md-4 mb-3">
+            <label class="form-label">Tracción / drivetrain</label>
+            <InputSelect class="form-select" @bind-Value="_model.DriveType">
+                <option value="">—</option>
+                <option value="@VehicleDriveType.Fwd">FWD</option>
+                <option value="@VehicleDriveType.Rwd">RWD</option>
+                <option value="@VehicleDriveType.Awd">AWD</option>
+                <option value="@VehicleDriveType.FourByFour">4x4</option>
+                <option value="@VehicleDriveType.FourByTwo">4x2</option>
+            </InputSelect>
+        </div>
+        <div class="col-md-4 mb-3">
+            <label class="form-label">Fuente</label>
+            <InputSelect class="form-select" @bind-Value="_model.VehicleSourceId">
+                <option value="0">— seleccionar —</option>
+                @foreach (var s in _sources)
+                {
+                    <option value="@s.Id">@s.Name</option>
+                }
+            </InputSelect>
+        </div>
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Fecha de adquisición</label>
+        <InputDate class="form-control" @bind-Value="_model.AcquiredAt" />
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Observaciones</label>
+        <InputTextArea class="form-control" @bind-Value="_model.Observations" rows="3" />
+    </div>
+    <button type="submit" class="btn btn-primary" disabled="@_saving">Guardar</button>
+    <a class="btn btn-link" href="vehicles">Cancelar</a>
+</EditForm>
+
+@code {
+    private readonly AcquireModel _model = new() { AcquiredAt = DateTime.Today };
+    private List<VehicleSource> _sources = [];
+    private string? _error;
+    private string? _info;
+    private bool _saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _sources = await Vehicles.GetSourcesAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private void OnVinChanged()
+    {
+        _info = null;
+        var (year, make) = VehicleService.TryDecodeVin(_model.Vin);
+        if (year is not null && _model.Year is null)
+            _model.Year = year;
+        if (!string.IsNullOrEmpty(make) && string.IsNullOrWhiteSpace(_model.Make))
+            _model.Make = make;
+        if (year is not null || make is not null)
+            _info = "Campos sugeridos desde el VIN (puedes corregirlos).";
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        _saving = true;
+        try
+        {
+            if (_model.VehicleSourceId <= 0)
+                throw new InvalidOperationException("Seleccione una fuente.");
+
+            await Vehicles.AcquireAsync(
+                _model.Vin ?? string.Empty,
+                _model.Year,
+                _model.Make,
+                _model.Model,
+                _model.TransmissionType,
+                _model.DriveType,
+                _model.Mileage,
+                _model.Observations,
+                _model.VehicleSourceId,
+                _model.AcquiredAt);
+
+            Nav.NavigateTo("vehicles");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private sealed class AcquireModel
+    {
+        public string? Vin { get; set; }
+        public int? Year { get; set; }
+        public string? Make { get; set; }
+        public string? Model { get; set; }
+        public TransmissionType? TransmissionType { get; set; }
+        public VehicleDriveType? DriveType { get; set; }
+        public int? Mileage { get; set; }
+        public string? Observations { get; set; }
+        public int VehicleSourceId { get; set; }
+        public DateTime AcquiredAt { get; set; }
+    }
+}

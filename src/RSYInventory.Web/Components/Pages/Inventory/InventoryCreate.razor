@@ -1,0 +1,128 @@
+@page "/inventory/new"
+@rendermode InteractiveServer
+@using RSYInventory.Data.Entities
+@using RSYInventory.Data.Enums
+@using RSYInventory.Data.Services
+@inject InventoryService Inventory
+@inject YardLayoutService Layout
+@inject NavigationManager Nav
+
+<PageTitle>Añadir pieza</PageTitle>
+
+<h1>Añadir motor o transmisión</h1>
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+<EditForm Model="_model" OnValidSubmit="SaveAsync">
+    <div class="mb-3">
+        <label class="form-label">Tipo</label>
+        <InputSelect class="form-select" @bind-Value="_model.ItemType">
+            <option value="@InventoryItemType.Engine">Motor</option>
+            <option value="@InventoryItemType.Transmission">Transmisión</option>
+        </InputSelect>
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Paleta</label>
+        <InputSelect class="form-select" @bind-Value="_model.PalletId">
+            <option value="0">— seleccionar —</option>
+            @foreach (var p in _pallets)
+            {
+                <option value="@p.Id">@YardLayoutService.FormatPalletLabel(p)</option>
+            }
+        </InputSelect>
+        <div class="form-text">Máx. 1 motor y 2 transmisiones por paleta; motor + transmisión permitido.</div>
+    </div>
+    <div class="row">
+        <div class="col-md-4 mb-3">
+            <label class="form-label">Marca</label>
+            <InputText class="form-control" @bind-Value="_model.Brand" />
+        </div>
+        <div class="col-md-4 mb-3">
+            <label class="form-label">Modelo</label>
+            <InputText class="form-control" @bind-Value="_model.Model" />
+        </div>
+        <div class="col-md-4 mb-3">
+            <label class="form-label">Año</label>
+            <InputNumber class="form-control" @bind-Value="_model.Year" />
+        </div>
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Nº de parte</label>
+        <InputText class="form-control" @bind-Value="_model.PartNumber" />
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Descripción</label>
+        <InputText class="form-control" @bind-Value="_model.Description" />
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Observaciones</label>
+        <InputTextArea class="form-control" @bind-Value="_model.Notes" />
+    </div>
+    <button type="submit" class="btn btn-primary" disabled="@_saving">Guardar</button>
+    <a class="btn btn-link" href="inventory">Cancelar</a>
+</EditForm>
+
+@code {
+    private readonly CreateModel _model = new();
+    private List<Pallet> _pallets = [];
+    private string? _error;
+    private bool _saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _pallets = await Layout.GetPalletsAsync(ZonePurpose.Parts);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        _saving = true;
+        try
+        {
+            if (_model.PalletId <= 0)
+                throw new InvalidOperationException("Seleccione una paleta.");
+
+            await Inventory.AddAsync(
+                _model.ItemType,
+                _model.PartNumber,
+                _model.Brand,
+                _model.Model,
+                _model.Year,
+                _model.Description,
+                _model.Notes,
+                _model.PalletId);
+
+            Nav.NavigateTo("inventory");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private sealed class CreateModel
+    {
+        public InventoryItemType ItemType { get; set; } = InventoryItemType.Engine;
+        public int PalletId { get; set; }
+        public string? Brand { get; set; }
+        public string? Model { get; set; }
+        public int? Year { get; set; }
+        public string? PartNumber { get; set; }
+        public string? Description { get; set; }
+        public string? Notes { get; set; }
+    }
+}
