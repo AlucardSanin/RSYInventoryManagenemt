@@ -73,7 +73,9 @@ public class VehicleService
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         return await db.Vehicles
+            .AsNoTracking()
             .Include(v => v.VehicleSource)
+            .Include(v => v.AcquiredByUser)
             .Include(v => v.Images)
             .Include(v => v.Pallet)!.ThenInclude(p => p!.Row)!.ThenInclude(r => r!.Zone)
             .FirstOrDefaultAsync(v => v.Id == id, ct);
@@ -225,6 +227,61 @@ public class VehicleService
         return string.IsNullOrWhiteSpace(vehicle.ImageRelativePath)
             ? []
             : [vehicle.ImageRelativePath];
+    }
+
+    public async Task UpdateAsync(
+        int vehicleId,
+        string vin,
+        int? year,
+        string? make,
+        string? model,
+        TransmissionType? transmissionType,
+        VehicleDriveType? driveType,
+        int? mileage,
+        decimal? purchasePrice,
+        string? observations,
+        int vehicleSourceId,
+        DateTime acquiredAt,
+        CancellationToken ct = default)
+    {
+        if (!_currentUser.CanAcquireVehicles && !_currentUser.CanManageUsers)
+            throw new UnauthorizedAccessException("No tiene permiso para editar vehículos.");
+
+        vin = vin.Trim().ToUpperInvariant();
+        if (vin.Length is < 11 or > 17)
+            throw new InvalidOperationException("El VIN debe tener entre 11 y 17 caracteres.");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+
+        var vehicle = await db.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+            ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+        if (await db.Vehicles.AnyAsync(v => v.Vin == vin && v.Id != vehicleId, ct))
+            throw new InvalidOperationException("Ya existe otro vehículo con ese VIN.");
+
+        var source = await db.VehicleSources.AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Id == vehicleSourceId, ct)
+            ?? throw new InvalidOperationException("Fuente de adquisición inválida.");
+
+        if (!source.IsActive && vehicle.VehicleSourceId != vehicleSourceId)
+            throw new InvalidOperationException("Fuente de adquisición inválida.");
+
+        vehicle.Vin = vin;
+        vehicle.Year = year;
+        vehicle.Make = string.IsNullOrWhiteSpace(make) ? null : make.Trim();
+        vehicle.Model = string.IsNullOrWhiteSpace(model) ? null : model.Trim();
+        vehicle.TransmissionType = transmissionType is null ? null : (int)transmissionType;
+        vehicle.DriveType = driveType is null ? null : (int)driveType;
+        vehicle.Mileage = mileage;
+        vehicle.PurchasePrice = purchasePrice is null or <= 0
+            ? null
+            : Math.Round(purchasePrice.Value, 2, MidpointRounding.AwayFromZero);
+        vehicle.Observations = string.IsNullOrWhiteSpace(observations) ? null : observations.Trim();
+        vehicle.VehicleSourceId = vehicleSourceId;
+        vehicle.AcquiredAt = acquiredAt;
+        vehicle.UpdatedAtUtc = DateTime.UtcNow;
+
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task AssignLocationAsync(int vehicleId, int palletId, string? notes, CancellationToken ct = default)

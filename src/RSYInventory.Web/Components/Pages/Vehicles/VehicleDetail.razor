@@ -1,0 +1,653 @@
+@page "/vehicles/{Id:int}"
+@implements IDisposable
+@inject VehicleService Vehicles
+@inject VinLookupService VinLookup
+@inject MediaStorageService Media
+@inject ICurrentUserService CurrentUser
+@inject UiBusyService Busy
+@inject NavigationManager Nav
+@using Microsoft.AspNetCore.Components.Forms
+
+<PageTitle>@(string.IsNullOrWhiteSpace(_vehicle?.Vin) ? "Vehículo" : _vehicle!.Vin)</PageTitle>
+
+<PageHeader Title="@HeaderTitle"
+            Eyebrow="Vehículos"
+            Lead="@(_editing ? "Edita los datos del vehículo adquirido." : "Detalle completo del vehículo.")">
+    <a class="btn btn-outline-secondary" href="vehicles">Volver al listado</a>
+    @if (_vehicle is not null && !_editing && CanEdit)
+    {
+        <button type="button" class="btn btn-primary" @onclick="StartEdit">Editar</button>
+    }
+</PageHeader>
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+@if (!string.IsNullOrEmpty(_info))
+{
+    <div class="alert alert-info">@_info</div>
+}
+
+@if (_vehicle is null && string.IsNullOrEmpty(_error))
+{
+    <div class="page-panel"><p class="mb-0 text-muted">Cargando vehículo…</p></div>
+}
+else if (_vehicle is not null && !_editing)
+{
+    <div class="page-panel">
+        <div class="row g-4">
+            <div class="col-lg-5">
+                @if (_images.Count > 0)
+                {
+                    <div class="vehicle-gallery">
+                        <button type="button" class="vehicle-gallery__main" @onclick="@(() => OpenViewer(_galleryIndex))">
+                            <img src="@_images[_galleryIndex]" alt="Foto del vehículo" />
+                            @if (_images.Count > 1)
+                            {
+                                <span class="vehicle-gallery__badge">@_images.Count fotos · ver carrusel</span>
+                            }
+                        </button>
+                        @if (_images.Count > 1)
+                        {
+                            <div class="vehicle-gallery__strip">
+                                @for (var i = 0; i < _images.Count; i++)
+                                {
+                                    var idx = i;
+                                    <button type="button"
+                                            class="vehicle-gallery__thumb @(_galleryIndex == idx ? "is-active" : null)"
+                                            @onclick="@(() => _galleryIndex = idx)">
+                                        <img src="@_images[idx]" alt="" />
+                                    </button>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="vehicle-gallery vehicle-gallery--empty">Sin fotos</div>
+                }
+            </div>
+            <div class="col-lg-7">
+                <dl class="detail-grid">
+                    <div>
+                        <dt>VIN</dt>
+                        <dd><code>@_vehicle.Vin</code></dd>
+                    </div>
+                    <div>
+                        <dt>Año</dt>
+                        <dd>@(_vehicle.Year?.ToString() ?? "—")</dd>
+                    </div>
+                    <div>
+                        <dt>Marca</dt>
+                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.Make) ? "—" : _vehicle.Make)</dd>
+                    </div>
+                    <div>
+                        <dt>Modelo</dt>
+                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.Model) ? "—" : _vehicle.Model)</dd>
+                    </div>
+                    <div>
+                        <dt>Transmisión</dt>
+                        <dd>@FormatTransmission(_vehicle.TransmissionType)</dd>
+                    </div>
+                    <div>
+                        <dt>Tracción</dt>
+                        <dd>@FormatDrive(_vehicle.DriveType)</dd>
+                    </div>
+                    <div>
+                        <dt>Millas</dt>
+                        <dd>@(_vehicle.Mileage?.ToString("N0") ?? "—")</dd>
+                    </div>
+                    <div>
+                        <dt>Precio de compra</dt>
+                        <dd>@(_vehicle.PurchasePrice is null ? "—" : _vehicle.PurchasePrice.Value.ToString("C2"))</dd>
+                    </div>
+                    <div>
+                        <dt>Fuente</dt>
+                        <dd>@(_vehicle.VehicleSource?.Name ?? "—")</dd>
+                    </div>
+                    <div>
+                        <dt>Fecha de adquisición</dt>
+                        <dd>@_vehicle.AcquiredAt.ToString("yyyy-MM-dd")</dd>
+                    </div>
+                    <div>
+                        <dt>Ubicación</dt>
+                        <dd>
+                            @if (_vehicle.Pallet is null)
+                            {
+                                <span class="badge-status badge-status--warn">Sin ubicar</span>
+                            }
+                            else
+                            {
+                                <span class="badge-status badge-status--ok">@YardLayoutService.FormatPalletLabel(_vehicle.Pallet)</span>
+                            }
+                        </dd>
+                    </div>
+                    <div>
+                        <dt>Registrado por</dt>
+                        <dd>@(_vehicle.AcquiredByUser?.DisplayName ?? _vehicle.AcquiredByUser?.UserName ?? "—")</dd>
+                    </div>
+                    <div class="detail-grid__full">
+                        <dt>Observaciones</dt>
+                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.Observations) ? "—" : _vehicle.Observations)</dd>
+                    </div>
+                </dl>
+
+                <div class="form-actions mt-3">
+                    @if (CurrentUser.CanEditInventory || CurrentUser.CanManageZones)
+                    {
+                        <a class="btn btn-outline-primary" href="@($"vehicles/{Id}/assign")">
+                            @(_vehicle.Pallet is null ? "Asignar ubicación" : "Cambiar ubicación")
+                        </a>
+                    }
+                    @if (CanEdit)
+                    {
+                        <button type="button" class="btn btn-primary" @onclick="StartEdit">Editar detalles</button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+else if (_vehicle is not null && _editing)
+{
+    <div class="page-panel">
+        <EditForm Model="_edit" OnValidSubmit="SaveEditAsync">
+            <div class="row g-3">
+                <div class="col-md-8">
+                    <label class="form-label">VIN *</label>
+                    <InputText class="form-control mono" @bind-Value="_edit.Vin" maxlength="17" />
+                </div>
+                <div class="col-md-4 d-flex flex-column justify-content-end">
+                    <button type="button" class="btn btn-outline-primary w-100" @onclick="DecodeVinAsync" disabled="@Busy.IsBusy">Decodificar VIN</button>
+                    @if (!string.IsNullOrEmpty(_vinHint))
+                    {
+                        <div class="vin-hint">@_vinHint</div>
+                    }
+                </div>
+
+                <div class="col-md-3">
+                    <label class="form-label" for="year-combo">Año</label>
+                    <SearchableCombo InputId="year-combo"
+                                     Value="@YearValue"
+                                     ValueChanged="OnYearChangedAsync"
+                                     Options="_yearOptions"
+                                     Placeholder="Escribe 201… o elige"
+                                     AllowCustom="false"
+                                     MaxSuggestions="20" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="make-combo">Marca</label>
+                    <SearchableCombo InputId="make-combo"
+                                     Value="@_edit.Make"
+                                     ValueChanged="OnMakeChangedAsync"
+                                     Options="_makeOptions"
+                                     Placeholder="@(_edit.Year is null ? "Primero elige un año" : "Escribe M… o elige")"
+                                     Disabled="@(_edit.Year is null)"
+                                     AllowCustom="true" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="model-combo">Modelo</label>
+                    <SearchableCombo InputId="model-combo"
+                                     @bind-Value="_edit.Model"
+                                     Options="_modelOptions"
+                                     Placeholder="@(string.IsNullOrWhiteSpace(_edit.Make) ? "Primero elige una marca" : (_loadingModels ? "Cargando…" : "Escribe o elige"))"
+                                     Disabled="@string.IsNullOrWhiteSpace(_edit.Make)"
+                                     AllowCustom="true"
+                                     MaxSuggestions="50" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Millas</label>
+                    <InputNumber class="form-control" @bind-Value="_edit.Mileage" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Precio de compra</label>
+                    <InputNumber class="form-control" @bind-Value="_edit.PurchasePrice" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="trans-combo">Transmisión</label>
+                    <SearchableCombo InputId="trans-combo"
+                                     Value="@TransmissionValue"
+                                     ValueChanged="OnTransmissionChangedAsync"
+                                     Options="_transmissionOptions"
+                                     AllowCustom="false" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="drive-combo">Tracción</label>
+                    <SearchableCombo InputId="drive-combo"
+                                     Value="@DriveValue"
+                                     ValueChanged="OnDriveChangedAsync"
+                                     Options="_driveOptions"
+                                     AllowCustom="false" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" for="source-combo">Fuente *</label>
+                    <SearchableCombo InputId="source-combo"
+                                     Value="@SourceValue"
+                                     ValueChanged="OnSourceChangedAsync"
+                                     Options="_sourceOptions"
+                                     AllowCustom="false" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Fecha de adquisición *</label>
+                    <InputDate class="form-control" @bind-Value="_edit.AcquiredAt" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Agregar fotos</label>
+                    <InputFile class="form-control" OnChange="OnImagesSelected" accept=".jpg,.jpeg,.png,.webp,image/*" multiple />
+                    <div class="image-upload-hint">Se agregan a la galería existente (máx. 12 por vez).</div>
+                    @if (_pendingFiles.Count > 0)
+                    {
+                        <div class="form-hint mt-1">@_pendingFiles.Count nueva(s)</div>
+                    }
+                </div>
+                <div class="col-12">
+                    <label class="form-label">Observaciones</label>
+                    <InputTextArea class="form-control" @bind-Value="_edit.Observations" rows="3" />
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary" disabled="@(_saving || Busy.IsBusy)">
+                    @(_saving ? "Guardando…" : "Guardar cambios")
+                </button>
+                <button type="button" class="btn btn-link" @onclick="CancelEdit" disabled="@_saving">Cancelar</button>
+            </div>
+        </EditForm>
+    </div>
+}
+
+<ImageViewer @ref="_viewer" />
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private static readonly IReadOnlyList<ComboOption> _transmissionOptions =
+    [
+        new(((int)TransmissionType.Automatic).ToString(), "Automática"),
+        new(((int)TransmissionType.Manual).ToString(), "Manual")
+    ];
+
+    private static readonly IReadOnlyList<ComboOption> _driveOptions =
+    [
+        new(((int)VehicleDriveType.Fwd).ToString(), "FWD"),
+        new(((int)VehicleDriveType.Rwd).ToString(), "RWD"),
+        new(((int)VehicleDriveType.Awd).ToString(), "AWD"),
+        new(((int)VehicleDriveType.FourByFour).ToString(), "4x4"),
+        new(((int)VehicleDriveType.FourByTwo).ToString(), "4x2")
+    ];
+
+    private static readonly IReadOnlyList<ComboOption> _yearOptions =
+        VehicleYearCatalog.AllYears.Select(y => new ComboOption(y, y)).ToList();
+
+    private Vehicle? _vehicle;
+    private EditModel _edit = new();
+    private List<ComboOption> _sourceOptions = [];
+    private List<ComboOption> _makeOptions = [];
+    private List<ComboOption> _modelOptions = [];
+    private List<string> _images = [];
+    private readonly List<IBrowserFile> _pendingFiles = [];
+    private CancellationTokenSource? _modelLoadCts;
+    private ImageViewer? _viewer;
+    private bool _editing;
+    private bool _saving;
+    private bool _loadingModels;
+    private int _galleryIndex;
+    private string? _error;
+    private string? _info;
+    private string? _vinHint;
+
+    private bool CanEdit => CurrentUser.CanAcquireVehicles || CurrentUser.CanManageUsers;
+    private string HeaderTitle => _vehicle is null
+        ? "Vehículo"
+        : string.IsNullOrWhiteSpace($"{_vehicle.Year} {_vehicle.Make} {_vehicle.Model}".Trim())
+            ? _vehicle.Vin
+            : $"{_vehicle.Year} {_vehicle.Make} {_vehicle.Model}".Trim();
+
+    private string? YearValue => _edit.Year?.ToString();
+    private string? TransmissionValue => _edit.TransmissionType is null ? null : ((int)_edit.TransmissionType.Value).ToString();
+    private string? DriveValue => _edit.DriveType is null ? null : ((int)_edit.DriveType.Value).ToString();
+    private string? SourceValue => _edit.VehicleSourceId <= 0 ? null : _edit.VehicleSourceId.ToString();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadAsync();
+    }
+
+    public void Dispose() => _modelLoadCts?.Cancel();
+
+    private async Task LoadAsync()
+    {
+        _error = null;
+        _editing = false;
+        _galleryIndex = 0;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                _vehicle = await Vehicles.GetByIdAsync(Id);
+                if (_vehicle is null)
+                {
+                    _error = "Vehículo no encontrado.";
+                    return;
+                }
+
+                _images = VehicleService.GetImagePaths(_vehicle).ToList();
+            }, "Cargando vehículo…");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task OpenViewer(int startIndex = 0)
+    {
+        if (_images.Count == 0 || _viewer is null) return;
+        await _viewer.OpenAsync(_images, startIndex);
+    }
+
+    private async Task StartEdit()
+    {
+        if (_vehicle is null || !CanEdit) return;
+        _error = null;
+        _info = null;
+        _vinHint = null;
+        _pendingFiles.Clear();
+
+        _edit = new EditModel
+        {
+            Vin = _vehicle.Vin,
+            Year = _vehicle.Year,
+            Make = _vehicle.Make,
+            Model = _vehicle.Model,
+            TransmissionType = _vehicle.TransmissionType is null ? null : (TransmissionType)_vehicle.TransmissionType.Value,
+            DriveType = _vehicle.DriveType is null ? null : (VehicleDriveType)_vehicle.DriveType.Value,
+            Mileage = _vehicle.Mileage,
+            PurchasePrice = _vehicle.PurchasePrice,
+            Observations = _vehicle.Observations,
+            VehicleSourceId = _vehicle.VehicleSourceId,
+            AcquiredAt = _vehicle.AcquiredAt
+        };
+
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                var sources = await Vehicles.GetSourcesAsync();
+                _sourceOptions = sources.Select(s => new ComboOption(s.Id.ToString(), s.Name)).ToList();
+                // Keep current source visible even if inactive.
+                if (_vehicle.VehicleSource is not null
+                    && !_sourceOptions.Any(o => o.Value == _vehicle.VehicleSourceId.ToString()))
+                {
+                    _sourceOptions.Insert(0, new ComboOption(
+                        _vehicle.VehicleSourceId.ToString(),
+                        $"{_vehicle.VehicleSource.Name} (inactiva)"));
+                }
+
+                var makes = await Vehicles.GetDistinctMakesAsync();
+                _makeOptions = makes.Select(m => new ComboOption(m, m)).ToList();
+                if (!string.IsNullOrWhiteSpace(_edit.Make) && _edit.Year is not null)
+                    await ReloadModelOptionsAsync();
+            }, "Preparando edición…");
+
+            _editing = true;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private void CancelEdit()
+    {
+        _editing = false;
+        _pendingFiles.Clear();
+        _error = null;
+        _vinHint = null;
+    }
+
+    private void OnImagesSelected(InputFileChangeEventArgs e)
+    {
+        _pendingFiles.Clear();
+        _pendingFiles.AddRange(e.GetMultipleFiles(12));
+    }
+
+    private async Task OnYearChangedAsync(string? value)
+    {
+        var previous = _edit.Year;
+        _edit.Year = int.TryParse(value, out var y) ? y : null;
+        if (_edit.Year != previous)
+        {
+            _edit.Make = null;
+            _edit.Model = null;
+            _modelOptions = [];
+        }
+        await Task.CompletedTask;
+    }
+
+    private async Task OnMakeChangedAsync(string? value)
+    {
+        var previous = _edit.Make;
+        _edit.Make = value;
+        if (!string.Equals(previous, value, StringComparison.OrdinalIgnoreCase))
+            _edit.Model = null;
+        await ScheduleModelReloadAsync();
+    }
+
+    private Task OnTransmissionChangedAsync(string? value)
+    {
+        _edit.TransmissionType = int.TryParse(value, out var n) ? (TransmissionType)n : null;
+        return Task.CompletedTask;
+    }
+
+    private Task OnDriveChangedAsync(string? value)
+    {
+        _edit.DriveType = int.TryParse(value, out var n) ? (VehicleDriveType)n : null;
+        return Task.CompletedTask;
+    }
+
+    private Task OnSourceChangedAsync(string? value)
+    {
+        _edit.VehicleSourceId = int.TryParse(value, out var id) ? id : 0;
+        return Task.CompletedTask;
+    }
+
+    private async Task ScheduleModelReloadAsync()
+    {
+        _modelLoadCts?.Cancel();
+        _modelLoadCts = new CancellationTokenSource();
+        var ct = _modelLoadCts.Token;
+        try
+        {
+            await Task.Delay(350, ct);
+            await ReloadModelOptionsAsync(ct);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task ReloadModelOptionsAsync(CancellationToken ct = default)
+    {
+        var make = _edit.Make?.Trim();
+        if (string.IsNullOrWhiteSpace(make) || _edit.Year is null)
+        {
+            _modelOptions = [];
+            _loadingModels = false;
+            return;
+        }
+
+        _loadingModels = true;
+        try
+        {
+            List<string> fromDb = [];
+            try { fromDb = await Vehicles.GetDistinctModelsAsync(make, ct); } catch { }
+
+            IReadOnlyList<string> fromApi = [];
+            try { fromApi = await VinLookup.GetModelsForMakeAsync(make, _edit.Year, ct); } catch { fromApi = []; }
+
+            IEnumerable<string> mergedSource = fromApi.Count > 0 ? fromApi : fromDb;
+            var merged = mergedSource
+                .Where(m => !string.IsNullOrWhiteSpace(m))
+                .Select(m => m.Trim())
+                .GroupBy(m => m, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .OrderBy(m => m, StringComparer.OrdinalIgnoreCase)
+                .Select(m => new ComboOption(m, m))
+                .ToList();
+
+            if (!string.IsNullOrWhiteSpace(_edit.Model)
+                && !merged.Any(o => string.Equals(o.Value, _edit.Model, StringComparison.OrdinalIgnoreCase)))
+            {
+                merged.Insert(0, new ComboOption(_edit.Model!, _edit.Model!));
+            }
+
+            _modelOptions = merged;
+        }
+        catch
+        {
+            _modelOptions = [];
+        }
+        finally
+        {
+            _loadingModels = false;
+        }
+    }
+
+    private async Task DecodeVinAsync()
+    {
+        if (Busy.IsBusy) return;
+        _error = null;
+        _info = null;
+        _vinHint = null;
+
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                var result = await VinLookup.DecodeAsync(_edit.Vin);
+                if (!string.IsNullOrWhiteSpace(result.ErrorMessage) || !result.HasAnyData)
+                {
+                    _vinHint = "¿Está bien el VIN?";
+                    _info = result.ErrorMessage ?? result.Warning ?? "No se pudo decodificar este VIN.";
+                    return;
+                }
+
+                if (!string.IsNullOrWhiteSpace(result.Vin))
+                    _edit.Vin = result.Vin;
+                if (result.Year is not null)
+                    _edit.Year = result.Year;
+                if (!string.IsNullOrWhiteSpace(result.Make))
+                    _edit.Make = result.Make;
+                if (!string.IsNullOrWhiteSpace(result.Model))
+                    _edit.Model = result.Model;
+                if (result.TransmissionType is not null)
+                    _edit.TransmissionType = result.TransmissionType;
+                if (result.DriveType is not null)
+                    _edit.DriveType = result.DriveType;
+
+                await ReloadModelOptionsAsync();
+                _info = "Se sugirieron campos desde el VIN. Revísalos antes de guardar.";
+            }, "Decodificando VIN…");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _vinHint = "¿Está bien el VIN?";
+        }
+    }
+
+    private async Task SaveEditAsync()
+    {
+        if (_saving || Busy.IsBusy || !CanEdit) return;
+        _error = null;
+        _saving = true;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                if (_edit.VehicleSourceId <= 0)
+                    throw new InvalidOperationException("Seleccione una fuente.");
+
+                await Vehicles.UpdateAsync(
+                    Id,
+                    _edit.Vin ?? string.Empty,
+                    _edit.Year,
+                    _edit.Make,
+                    _edit.Model,
+                    _edit.TransmissionType,
+                    _edit.DriveType,
+                    _edit.Mileage,
+                    _edit.PurchasePrice,
+                    _edit.Observations,
+                    _edit.VehicleSourceId,
+                    _edit.AcquiredAt);
+
+                var failed = 0;
+                foreach (var file in _pendingFiles)
+                {
+                    try
+                    {
+                        await using var stream = file.OpenReadStream(maxAllowedSize: 8 * 1024 * 1024);
+                        var path = await Media.SaveAsync(stream, file.Name, "vehicles", Id, _edit.Make);
+                        await Vehicles.AddImageAsync(Id, path);
+                    }
+                    catch
+                    {
+                        failed++;
+                    }
+                }
+
+                _pendingFiles.Clear();
+                await LoadAsync();
+                _info = failed > 0
+                    ? $"Cambios guardados, pero {failed} foto(s) no se subieron."
+                    : "Cambios guardados.";
+            }, "Guardando cambios…");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _editing = true;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private static string FormatTransmission(int? value) => value switch
+    {
+        (int)TransmissionType.Automatic => "Automática",
+        (int)TransmissionType.Manual => "Manual",
+        _ => "—"
+    };
+
+    private static string FormatDrive(int? value) => value switch
+    {
+        (int)VehicleDriveType.Fwd => "FWD",
+        (int)VehicleDriveType.Rwd => "RWD",
+        (int)VehicleDriveType.Awd => "AWD",
+        (int)VehicleDriveType.FourByFour => "4x4",
+        (int)VehicleDriveType.FourByTwo => "4x2",
+        _ => "—"
+    };
+
+    private sealed class EditModel
+    {
+        public string? Vin { get; set; }
+        public int? Year { get; set; }
+        public string? Make { get; set; }
+        public string? Model { get; set; }
+        public TransmissionType? TransmissionType { get; set; }
+        public VehicleDriveType? DriveType { get; set; }
+        public int? Mileage { get; set; }
+        public decimal? PurchasePrice { get; set; }
+        public string? Observations { get; set; }
+        public int VehicleSourceId { get; set; }
+        public DateTime AcquiredAt { get; set; }
+    }
+}

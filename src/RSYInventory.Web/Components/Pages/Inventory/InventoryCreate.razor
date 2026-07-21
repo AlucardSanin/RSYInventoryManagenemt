@@ -199,18 +199,42 @@
                 </div>
             </div>
 
-            @* Step 5: paleta + extras *@
+            @* Step 5: ubicación + extras *@
             <div class="form-step @(_mobileStep == 5 ? "is-active" : null)">
                 <div class="row g-3">
-                    <div class="col-12">
+                    <div class="col-md-4">
+                        <label class="form-label" for="zone-combo">Zona *</label>
+                        <SearchableCombo InputId="zone-combo"
+                                         Value="@ZoneValue"
+                                         ValueChanged="OnZoneChangedAsync"
+                                         Options="_zoneOptions"
+                                         Placeholder="Elige una zona de partes…"
+                                         AllowCustom="false" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="row-combo">Fila *</label>
+                        <SearchableCombo InputId="row-combo"
+                                         Value="@RowValue"
+                                         ValueChanged="OnRowChangedAsync"
+                                         Options="_rowOptions"
+                                         Placeholder="@(_selectedZoneId <= 0 ? "Primero elige una zona" : "Elige una fila…")"
+                                         EmptyHint="@(_selectedZoneId <= 0 ? "Primero elige una zona" : "Sin filas en esta zona")"
+                                         Disabled="@(_selectedZoneId <= 0)"
+                                         AllowCustom="false" />
+                    </div>
+                    <div class="col-md-4">
                         <label class="form-label" for="pallet-combo">Paleta *</label>
                         <SearchableCombo InputId="pallet-combo"
                                          Value="@PalletValue"
                                          ValueChanged="OnPalletChangedAsync"
                                          Options="_palletOptions"
-                                         Placeholder="Escribe para filtrar zona, fila o paleta…"
+                                         Placeholder="@(_selectedRowId <= 0 ? "Primero elige una fila" : "Elige una paleta…")"
+                                         EmptyHint="@(_selectedRowId <= 0 ? "Primero elige una fila" : "Sin paletas en esta fila")"
+                                         Disabled="@(_selectedRowId <= 0)"
                                          AllowCustom="false" />
-                        <div class="form-text">Solo paletas de zonas de <strong>partes</strong> (no vehículos). Máx. 1 motor y 2 transmisiones por paleta.</div>
+                    </div>
+                    <div class="col-12">
+                        <div class="form-text">Solo zonas de <strong>partes</strong>. Máx. 1 motor y 2 transmisiones por paleta.</div>
                     </div>
                     <div class="col-md-6">
                         <label class="form-label">Foto <span class="form-hint">(opcional)</span></label>
@@ -282,10 +306,14 @@
         VehicleYearCatalog.AllYears.Select(y => new ComboOption(y, y)).ToList();
 
     private readonly CreateModel _model = new();
-    private List<Pallet> _pallets = [];
+    private List<Zone> _zones = [];
+    private List<ComboOption> _zoneOptions = [];
+    private List<ComboOption> _rowOptions = [];
     private List<ComboOption> _palletOptions = [];
     private List<ComboOption> _brandOptions = [];
     private List<ComboOption> _modelOptions = [];
+    private int _selectedZoneId;
+    private int _selectedRowId;
     private CancellationTokenSource? _modelLoadCts;
     private bool _loadingModels;
     private string? _error;
@@ -298,6 +326,8 @@
     private string? _imageName;
 
     private string? YearValue => _model.Year?.ToString();
+    private string? ZoneValue => _selectedZoneId <= 0 ? null : _selectedZoneId.ToString();
+    private string? RowValue => _selectedRowId <= 0 ? null : _selectedRowId.ToString();
     private string? PalletValue => _model.PalletId <= 0 ? null : _model.PalletId.ToString();
     private string? TransmissionValue => _model.TransmissionType is null ? null : ((int)_model.TransmissionType.Value).ToString();
     private string? DriveValue => _model.DriveType is null ? null : ((int)_model.DriveType.Value).ToString();
@@ -309,7 +339,7 @@
         2 => "Cómo cargar datos",
         3 => "Año, marca y modelo",
         4 => _model.ItemType == InventoryItemType.Engine ? "Datos del motor" : "Datos de la transmisión",
-        _ => "Paleta y extras"
+        _ => "Ubicación y extras"
     };
 
     private string ModelPlaceholder =>
@@ -329,13 +359,9 @@
         {
             await Busy.RunAsync(async () =>
             {
-                _pallets = await Layout.GetPalletsAsync(ZonePurpose.Parts);
-                _palletOptions = _pallets
-                    .Select(p =>
-                    {
-                        var label = YardLayoutService.FormatPalletLabel(p);
-                        return new ComboOption(p.Id.ToString(), label, label);
-                    })
+                _zones = await Layout.GetZonesAsync(ZonePurpose.Parts);
+                _zoneOptions = _zones
+                    .Select(z => new ComboOption(z.Id.ToString(), z.Name, z.Name))
                     .ToList();
 
                 var brands = await Inventory.GetDistinctBrandsAsync();
@@ -389,6 +415,9 @@
                         && (_model.TransmissionType is null || _model.DriveType is null):
                 message = "Indica el tipo de transmisión y la tracción.";
                 return false;
+            case 5 when _model.PalletId <= 0:
+                message = "Selecciona zona, fila y paleta.";
+                return false;
             default:
                 return true;
         }
@@ -410,10 +439,67 @@
         }
     }
 
+    private Task OnZoneChangedAsync(string? value)
+    {
+        var next = int.TryParse(value, out var id) ? id : 0;
+        if (next == _selectedZoneId) return Task.CompletedTask;
+
+        _selectedZoneId = next;
+        _selectedRowId = 0;
+        _model.PalletId = 0;
+        RebuildRowOptions();
+        _palletOptions = [];
+        return Task.CompletedTask;
+    }
+
+    private Task OnRowChangedAsync(string? value)
+    {
+        var next = int.TryParse(value, out var id) ? id : 0;
+        if (next == _selectedRowId) return Task.CompletedTask;
+
+        _selectedRowId = next;
+        _model.PalletId = 0;
+        RebuildPalletOptions();
+        return Task.CompletedTask;
+    }
+
     private Task OnPalletChangedAsync(string? value)
     {
         _model.PalletId = int.TryParse(value, out var id) ? id : 0;
         return Task.CompletedTask;
+    }
+
+    private void RebuildRowOptions()
+    {
+        var zone = _zones.FirstOrDefault(z => z.Id == _selectedZoneId);
+        _rowOptions = (zone?.Rows ?? [])
+            .Where(r => r.IsActive)
+            .OrderBy(r => r.RowNumber)
+            .Select(r =>
+            {
+                var label = string.IsNullOrWhiteSpace(r.Label)
+                    ? $"Fila {r.RowNumber}"
+                    : $"Fila {r.RowNumber} ({r.Label})";
+                return new ComboOption(r.Id.ToString(), label, label);
+            })
+            .ToList();
+    }
+
+    private void RebuildPalletOptions()
+    {
+        var zone = _zones.FirstOrDefault(z => z.Id == _selectedZoneId);
+        var row = zone?.Rows.FirstOrDefault(r => r.Id == _selectedRowId);
+        _palletOptions = (row?.Pallets ?? [])
+            .Where(p => p.IsActive)
+            .OrderBy(p => p.PalletNumber)
+            .Select(p =>
+            {
+                var label = string.IsNullOrWhiteSpace(p.Label)
+                    ? $"Paleta {p.PalletNumber}"
+                    : $"Paleta {p.PalletNumber} ({p.Label})";
+                return new ComboOption(p.Id.ToString(), label, label);
+            })
+            .ToList();
     }
 
     private void OnImageSelected(InputFileChangeEventArgs e)

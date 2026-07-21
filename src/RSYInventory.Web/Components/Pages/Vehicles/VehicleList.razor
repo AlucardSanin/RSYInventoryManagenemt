@@ -1,13 +1,18 @@
 @page "/vehicles"
 @inject VehicleService Vehicles
+@inject ICurrentUserService CurrentUser
 @inject UiBusyService Busy
+@inject NavigationManager Nav
 
 <PageTitle>Vehículos</PageTitle>
 
 <PageHeader Title="Vehículos adquiridos"
             Eyebrow="Vehículos"
-            Lead="Busca por VIN, marca, modelo, año o ubicación. Toca la miniatura para ver las fotos.">
-    <a class="btn btn-primary" href="vehicles/acquire">Registrar adquisición</a>
+            Lead="Haz clic en una fila para ver el detalle. En la miniatura abres el carrusel de fotos.">
+    @if (CurrentUser.CanAcquireVehicles)
+    {
+        <a class="btn btn-primary" href="vehicles/acquire">Registrar adquisición</a>
+    }
 </PageHeader>
 
 @if (!string.IsNullOrEmpty(_error))
@@ -24,7 +29,10 @@ else if (_items.Count == 0)
     <div class="page-panel empty-state">
         <p class="empty-state__title">Aún no hay vehículos</p>
         <p class="mb-3">Registra la primera adquisición con VIN y fuente de compra.</p>
-        <a class="btn btn-primary" href="vehicles/acquire">Registrar adquisición</a>
+        @if (CurrentUser.CanAcquireVehicles)
+        {
+            <a class="btn btn-primary" href="vehicles/acquire">Registrar adquisición</a>
+        }
     </div>
 }
 else
@@ -81,14 +89,15 @@ else
                 <tbody>
                     @foreach (var v in Filtered)
                     {
-                        var images = VehicleService.GetImagePaths(v);
-                        <tr>
-                            <td style="width:3.75rem">
+                        var vehicleId = v.Id;
+                        var images = VehicleService.GetImagePaths(v).ToList();
+                        <tr class="row-clickable" @onclick="@(() => GoToDetail(vehicleId))">
+                            <td style="width:3.75rem" @onclick:stopPropagation="true">
                                 @if (images.Count > 0)
                                 {
                                     <button type="button"
                                             class="thumb-btn"
-                                            title="@(images.Count == 1 ? "Ver foto" : $"Ver {images.Count} fotos")"
+                                            title="@(images.Count == 1 ? "Ver foto" : $"Carrusel · {images.Count} fotos")"
                                             @onclick="@(() => OpenViewer(images))">
                                         <img class="thumb-img" src="@images[0]" alt="" />
                                         @if (images.Count > 1)
@@ -117,10 +126,14 @@ else
                                     <span class="badge-status badge-status--ok">@YardLayoutService.FormatPalletLabel(v.Pallet)</span>
                                 }
                             </td>
-                            <td class="text-end">
-                                <a class="btn btn-sm btn-outline-primary" href="@($"vehicles/{v.Id}/assign")">
-                                    @(v.Pallet is null ? "Asignar ubicación" : "Cambiar ubicación")
-                                </a>
+                            <td class="text-end" @onclick:stopPropagation="true">
+                                <a class="btn btn-sm btn-outline-secondary" href="@($"vehicles/{vehicleId}")">Ver</a>
+                                @if (CurrentUser.CanEditInventory || CurrentUser.CanManageZones)
+                                {
+                                    <a class="btn btn-sm btn-outline-primary" href="@($"vehicles/{vehicleId}/assign")">
+                                        @(v.Pallet is null ? "Ubicar" : "Mover")
+                                    </a>
+                                }
                             </td>
                         </tr>
                     }
@@ -175,12 +188,17 @@ else
         }
         catch (Exception ex)
         {
-            _error = ex.Message + " — ¿Ejecutaste los scripts SQL?";
+            _error = ex.Message + " — ¿Ejecutaste los scripts SQL (incl. 007_VehicleImages)?";
         }
     }
 
-    private void OpenViewer(IReadOnlyList<string> images)
-        => _viewer?.Open(images);
+    private void GoToDetail(int id) => Nav.NavigateTo($"vehicles/{id}");
+
+    private async Task OpenViewer(IReadOnlyList<string> images)
+    {
+        if (_viewer is null || images.Count == 0) return;
+        await _viewer.OpenAsync(images);
+    }
 
     private static bool Contains(string? haystack, string needle)
         => !string.IsNullOrEmpty(haystack)
