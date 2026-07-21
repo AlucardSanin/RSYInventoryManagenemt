@@ -1,81 +1,44 @@
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
-using RSYInventory.Data.Data;
 using RSYInventory.Data.Enums;
 
 namespace RSYInventory.Data.Services;
 
 /// <summary>
-/// Resolves the current user from SQL Server (Users / UserRoles / Roles).
-/// Configure App:CurrentUserName until real authentication is added.
+/// Reads the signed-in user from <see cref="CurrentUserState"/> (filled by <see cref="AuthService"/>).
 /// </summary>
 public sealed class DatabaseCurrentUserService : ICurrentUserService
 {
-    private readonly YardInventoryDbContext _db;
-    private readonly string _userName;
-    private bool _loaded;
-    private int _userId;
-    private string _displayName = string.Empty;
-    private HashSet<AppRole> _roles = [];
+    private readonly CurrentUserState _state;
 
-    public DatabaseCurrentUserService(YardInventoryDbContext db, IConfiguration configuration)
+    public DatabaseCurrentUserService(CurrentUserState state)
     {
-        _db = db;
-        _userName = configuration["App:CurrentUserName"] ?? "demo";
+        _state = state;
     }
 
-    public int UserId
-    {
-        get
-        {
-            EnsureLoaded();
-            return _userId;
-        }
-    }
+    public bool IsAuthenticated => _state.IsAuthenticated;
 
-    public string DisplayName
-    {
-        get
-        {
-            EnsureLoaded();
-            return _displayName;
-        }
-    }
+    public int UserId => Require().UserId;
 
-    public bool HasRole(AppRole role)
-    {
-        EnsureLoaded();
-        return _roles.Contains(role);
-    }
+    public string UserName => Require().UserName;
+
+    public string DisplayName => Require().DisplayName;
+
+    public bool HasRole(AppRole role) =>
+        _state.Snapshot?.Roles.Contains(role) == true;
 
     public bool CanViewInventory => HasRole(AppRole.InventoryViewer)
                                     || CanEditInventory
                                     || CanManageZones;
 
-    public bool CanEditInventory => HasRole(AppRole.InventoryEditor) || CanManageZones;
+    public bool CanEditInventory => HasRole(AppRole.InventoryEditor) || CanManageZones || CanManageUsers;
 
-    public bool CanManageZones => HasRole(AppRole.ZoneManager);
+    public bool CanManageZones => HasRole(AppRole.ZoneManager) || CanManageUsers;
 
     public bool CanAcquireVehicles => HasRole(AppRole.VehicleAcquirer)
-                                      || CanEditInventory
-                                      || CanManageZones;
+                                      || CanEditInventory;
 
-    private void EnsureLoaded()
-    {
-        if (_loaded)
-            return;
+    public bool CanManageUsers => HasRole(AppRole.SystemAdmin);
 
-        var user = _db.Users
-            .AsNoTracking()
-            .Include(u => u.Roles)
-            .FirstOrDefault(u => u.UserName == _userName && u.IsActive)
-            ?? throw new InvalidOperationException(
-                $"Usuario '{_userName}' no encontrado en RSYYardInventory. " +
-                "Aplica resources/Database/*.sql en SSMS (p. ej. 002_DemoUserAndPartsZone.sql).");
-
-        _userId = user.Id;
-        _displayName = user.DisplayName;
-        _roles = user.Roles.Select(r => (AppRole)r.Code).ToHashSet();
-        _loaded = true;
-    }
+    private CurrentUserSnapshot Require() =>
+        _state.Snapshot
+        ?? throw new InvalidOperationException("No hay sesión activa. Inicie sesión.");
 }

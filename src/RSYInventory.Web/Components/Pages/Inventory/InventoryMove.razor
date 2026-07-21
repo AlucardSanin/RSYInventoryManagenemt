@@ -1,15 +1,16 @@
 @page "/inventory/{Id:int}/move"
-@rendermode InteractiveServer
-@using RSYInventory.Data.Entities
-@using RSYInventory.Data.Enums
-@using RSYInventory.Data.Services
 @inject InventoryService Inventory
 @inject YardLayoutService Layout
+@inject UiBusyService Busy
 @inject NavigationManager Nav
 
 <PageTitle>Mover / Vender</PageTitle>
 
-<h1>Cambiar ubicación</h1>
+<PageHeader Title="Mover o vender pieza"
+            Eyebrow="Inventario"
+            Lead="Indica si la pieza se reubica a otra paleta o se marca como vendida.">
+    <a class="btn btn-outline-secondary" href="inventory">Volver</a>
+</PageHeader>
 
 @if (!string.IsNullOrEmpty(_error))
 {
@@ -18,50 +19,76 @@
 
 @if (_item is null && string.IsNullOrEmpty(_error))
 {
-    <p>Cargando…</p>
+    <div class="page-panel"><p class="mb-0 text-muted">Cargando pieza…</p></div>
 }
 else if (_item is not null)
 {
-    <p>
-        <strong>@(_item.ItemType == (int)InventoryItemType.Engine ? "Motor" : "Transmisión")</strong>
-        @_item.Brand @_item.Model
-        <br />
-        Ubicación actual: @(_item.Pallet is null ? "—" : YardLayoutService.FormatPalletLabel(_item.Pallet))
-    </p>
-
-    <div class="alert alert-warning">
-        ¿La pieza fue <strong>vendida</strong> o solo se está <strong>reubicando</strong>?
-    </div>
-
-    <div class="mb-3">
-        <label class="form-label">Acción</label>
-        <select class="form-select" @bind="_movementType">
-            <option value="@MovementType.Relocated">Solo reubicar</option>
-            <option value="@MovementType.Sold">Vendido</option>
-        </select>
-    </div>
-
-    @if (_movementType == MovementType.Relocated)
-    {
-        <div class="mb-3">
-            <label class="form-label">Nueva paleta</label>
-            <select class="form-select" @bind="_newPalletId">
-                <option value="0">— seleccionar —</option>
-                @foreach (var p in _pallets)
-                {
-                    <option value="@p.Id">@YardLayoutService.FormatPalletLabel(p)</option>
-                }
-            </select>
+    <div class="page-panel">
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+            @if (_item.ItemType == (int)InventoryItemType.Engine)
+            {
+                <span class="badge-type badge-type--engine">Motor</span>
+            }
+            else
+            {
+                <span class="badge-type badge-type--transmission">Transmisión</span>
+            }
+            <strong>@_item.Brand @_item.Model</strong>
         </div>
-    }
-
-    <div class="mb-3">
-        <label class="form-label">Notas</label>
-        <input class="form-control" @bind="_notes" />
+        <p class="meta-row mb-0">
+            <span>Ubicación actual: <strong>@(_item.Pallet is null ? "—" : YardLayoutService.FormatPalletLabel(_item.Pallet))</strong></span>
+        </p>
     </div>
 
-    <button class="btn btn-primary" disabled="@_saving" @onclick="ConfirmAsync">Confirmar</button>
-    <a class="btn btn-link" href="inventory">Cancelar</a>
+    <div class="page-panel">
+        <h2 class="page-panel__title">¿Qué ocurrió con la pieza?</h2>
+
+        <div class="choice-cards mb-3">
+            <button type="button"
+                    class="choice-card text-start @(_movementType == MovementType.Relocated ? "is-selected" : null)"
+                    @onclick="@(() => _movementType = MovementType.Relocated)">
+                <strong>Solo reubicar</strong>
+                <span>Se mueve a otra paleta y sigue disponible.</span>
+            </button>
+            <button type="button"
+                    class="choice-card text-start @(_movementType == MovementType.Sold ? "is-selected" : null)"
+                    @onclick="@(() => _movementType = MovementType.Sold)">
+                <strong>Vendida</strong>
+                <span>Sale del inventario y deja libre la paleta.</span>
+            </button>
+        </div>
+
+        @if (_movementType == MovementType.Relocated)
+        {
+            <div class="mb-3">
+                <label class="form-label" for="pallet-combo">Nueva paleta *</label>
+                <SearchableCombo InputId="pallet-combo"
+                                 Value="@PalletValue"
+                                 ValueChanged="OnPalletChangedAsync"
+                                 Options="_palletOptions"
+                                 Placeholder="Escribe para filtrar zona, fila o paleta…"
+                                 AllowCustom="false" />
+            </div>
+        }
+        else
+        {
+            <div class="alert alert-warning">
+                Al confirmar, la pieza quedará marcada como vendida y sin ubicación.
+            </div>
+        }
+
+        <div class="mb-3">
+            <label class="form-label">Notas</label>
+            <input class="form-control" @bind="_notes" placeholder="Opcional" />
+        </div>
+
+        <div class="form-actions">
+            <button class="btn btn-primary" disabled="@_saving" @onclick="ConfirmAsync">
+                @(_saving ? "Guardando…" : "Confirmar")
+            </button>
+            <a class="btn btn-link" href="inventory">Cancelar</a>
+        </div>
+    </div>
 }
 
 @code {
@@ -69,24 +96,37 @@ else if (_item is not null)
 
     private InventoryItem? _item;
     private List<Pallet> _pallets = [];
+    private List<ComboOption> _palletOptions = [];
     private MovementType _movementType = MovementType.Relocated;
     private int _newPalletId;
     private string? _notes;
     private string? _error;
     private bool _saving;
 
+    private string? PalletValue => _newPalletId <= 0 ? null : _newPalletId.ToString();
+
     protected override async Task OnInitializedAsync()
     {
         try
         {
-            _item = await Inventory.GetByIdAsync(Id);
-            if (_item is null)
+            await Busy.RunAsync(async () =>
             {
-                _error = "Pieza no encontrada.";
-                return;
-            }
+                _item = await Inventory.GetByIdAsync(Id);
+                if (_item is null)
+                {
+                    _error = "Pieza no encontrada.";
+                    return;
+                }
 
-            _pallets = await Layout.GetPalletsAsync(ZonePurpose.Parts);
+                _pallets = await Layout.GetPalletsAsync(ZonePurpose.Parts);
+                _palletOptions = _pallets
+                    .Select(p =>
+                    {
+                        var label = YardLayoutService.FormatPalletLabel(p);
+                        return new ComboOption(p.Id.ToString(), label, label);
+                    })
+                    .ToList();
+            }, "Cargando pieza…");
         }
         catch (Exception ex)
         {
@@ -94,19 +134,29 @@ else if (_item is not null)
         }
     }
 
+    private Task OnPalletChangedAsync(string? value)
+    {
+        _newPalletId = int.TryParse(value, out var id) ? id : 0;
+        return Task.CompletedTask;
+    }
+
     private async Task ConfirmAsync()
     {
+        if (Busy.IsBusy || _saving) return;
         _error = null;
         _saving = true;
         try
         {
-            await Inventory.ChangeLocationAsync(
-                Id,
-                _movementType,
-                _movementType == MovementType.Relocated ? _newPalletId : null,
-                _notes);
+            await Busy.RunAsync(async () =>
+            {
+                await Inventory.ChangeLocationAsync(
+                    Id,
+                    _movementType,
+                    _movementType == MovementType.Relocated ? _newPalletId : null,
+                    _notes);
 
-            Nav.NavigateTo("inventory");
+                Nav.NavigateTo("inventory");
+            }, "Confirmando…");
         }
         catch (Exception ex)
         {

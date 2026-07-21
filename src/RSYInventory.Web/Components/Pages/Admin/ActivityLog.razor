@@ -1,0 +1,128 @@
+@page "/admin/activity"
+@inject ActivityLogService Activity
+@inject UiBusyService Busy
+@inject ICurrentUserService CurrentUser
+@inject NavigationManager Nav
+
+<PageTitle>Log de actividad</PageTitle>
+
+<PageHeader Title="Log de actividad"
+            Eyebrow="Administración"
+            Lead="Solo visible para la cuenta god/admin. Busca movimientos de piezas/vehículos y cambios de zonas." />
+
+@if (!CurrentUser.CanManageUsers)
+{
+    <div class="alert alert-danger">No tienes permiso para ver este log.</div>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-danger">@_error</div>
+    }
+
+    <div class="page-panel mb-3">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-5">
+                <label class="form-label" for="act-q">Buscar</label>
+                <input id="act-q" class="form-control" @bind="_query" placeholder="Usuario, zona, paleta, VIN, Ford…" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="act-user">Usuario</label>
+                <input id="act-user" class="form-control" @bind="_user" placeholder="demo" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Desde</label>
+                <InputDate class="form-control" @bind-Value="_from" />
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-primary w-100" @onclick="SearchAsync" disabled="@Busy.IsBusy">Buscar</button>
+            </div>
+        </div>
+    </div>
+
+    @if (_entries is null)
+    {
+        <div class="page-panel"><p class="mb-0 text-muted">Cargando…</p></div>
+    }
+    else if (_entries.Count == 0)
+    {
+        <div class="page-panel empty-state">
+            <p class="empty-state__title">Sin eventos</p>
+            <p class="mb-0">Ajusta el filtro o realiza operaciones en la yarda.</p>
+        </div>
+    }
+    else
+    {
+        <div class="page-panel table-shell">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Cuándo (UTC)</th>
+                        <th>Usuario</th>
+                        <th>Tipo</th>
+                        <th>Resumen</th>
+                        <th>Ubicación / entidad</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var e in _entries)
+                    {
+                        <tr>
+                            <td class="mono">@e.AtUtc.ToString("yyyy-MM-dd HH:mm")</td>
+                            <td>@e.UserName</td>
+                            <td>
+                                <span class="badge-status @(e.Source == "Auditoría" ? "badge-status--parts" : "badge-status--ok")">@e.EventType</span>
+                            </td>
+                            <td>
+                                <strong>@e.Summary</strong>
+                                @if (!string.IsNullOrWhiteSpace(e.Details))
+                                {
+                                    <div class="form-hint">@e.Details</div>
+                                }
+                            </td>
+                            <td class="form-hint">@(e.Location ?? "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@code {
+    private List<ActivityLogEntry>? _entries;
+    private string? _error;
+    private string _query = string.Empty;
+    private string _user = string.Empty;
+    private DateTime? _from;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CurrentUser.CanManageUsers)
+        {
+            Nav.NavigateTo("/");
+            return;
+        }
+
+        await SearchAsync();
+    }
+
+    private async Task SearchAsync()
+    {
+        if (!CurrentUser.CanManageUsers || Busy.IsBusy) return;
+        _error = null;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                DateTime? fromUtc = _from?.ToUniversalTime().Date;
+                _entries = await Activity.SearchAsync(_query, _user, fromUtc, null);
+            }, "Buscando actividad…");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+}

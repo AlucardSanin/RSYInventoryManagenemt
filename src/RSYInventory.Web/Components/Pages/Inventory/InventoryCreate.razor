@@ -1,81 +1,258 @@
 @page "/inventory/new"
-@rendermode InteractiveServer
-@using RSYInventory.Data.Entities
-@using RSYInventory.Data.Enums
-@using RSYInventory.Data.Services
+@implements IDisposable
 @inject InventoryService Inventory
 @inject YardLayoutService Layout
+@inject VinLookupService VinLookup
+@inject MediaStorageService Media
+@inject UiBusyService Busy
 @inject NavigationManager Nav
+@using Microsoft.AspNetCore.Components.Forms
 
 <PageTitle>Añadir pieza</PageTitle>
 
-<h1>Añadir motor o transmisión</h1>
+<PageHeader Title="Añadir motor o transmisión"
+            Eyebrow="Inventario"
+            Lead="El formulario cambia según el tipo de pieza. Puedes cargar datos a mano o sugerirlos desde un VIN.">
+    <a class="btn btn-outline-secondary" href="inventory">Volver al inventario</a>
+</PageHeader>
 
 @if (!string.IsNullOrEmpty(_error))
 {
     <div class="alert alert-danger">@_error</div>
 }
+@if (!string.IsNullOrEmpty(_info))
+{
+    <div class="alert alert-info">@_info</div>
+}
 
-<EditForm Model="_model" OnValidSubmit="SaveAsync">
-    <div class="mb-3">
-        <label class="form-label">Tipo</label>
-        <InputSelect class="form-select" @bind-Value="_model.ItemType">
-            <option value="@InventoryItemType.Engine">Motor</option>
-            <option value="@InventoryItemType.Transmission">Transmisión</option>
-        </InputSelect>
-    </div>
-    <div class="mb-3">
-        <label class="form-label">Paleta</label>
-        <InputSelect class="form-select" @bind-Value="_model.PalletId">
-            <option value="0">— seleccionar —</option>
-            @foreach (var p in _pallets)
+<div class="page-panel">
+    <EditForm Model="_model" OnValidSubmit="SaveAsync">
+        <div class="row g-3">
+            <div class="col-12">
+                <label class="form-label d-block mb-2">Tipo de pieza *</label>
+                <div class="choice-cards choice-cards--compact">
+                    <button type="button"
+                            class="choice-card text-start @(_model.ItemType == InventoryItemType.Engine ? "is-selected" : null)"
+                            @onclick="@(() => SetItemType(InventoryItemType.Engine))">
+                        <strong>Motor</strong>
+                        <span>Cilindrada y datos del motor.</span>
+                    </button>
+                    <button type="button"
+                            class="choice-card text-start @(_model.ItemType == InventoryItemType.Transmission ? "is-selected" : null)"
+                            @onclick="@(() => SetItemType(InventoryItemType.Transmission))">
+                        <strong>Transmisión</strong>
+                        <span>Tipo de caja y tracción.</span>
+                    </button>
+                </div>
+            </div>
+            <div class="col-12">
+                <label class="form-label" for="pallet-combo">Paleta *</label>
+                <SearchableCombo InputId="pallet-combo"
+                                 Value="@PalletValue"
+                                 ValueChanged="OnPalletChangedAsync"
+                                 Options="_palletOptions"
+                                 Placeholder="Escribe para filtrar zona, fila o paleta…"
+                                 AllowCustom="false" />
+                <div class="form-text">Solo paletas de zonas de <strong>partes</strong> (no vehículos). Máx. 1 motor y 2 transmisiones por paleta.</div>
+            </div>
+
+            <div class="col-12">
+                <label class="form-label d-block mb-2">Cómo quieres cargar los datos</label>
+                <div class="choice-cards">
+                    <button type="button"
+                            class="choice-card text-start @(_entryMode == EntryMode.Manual ? "is-selected" : null)"
+                            @onclick="@(() => _entryMode = EntryMode.Manual)">
+                        <strong>Manual</strong>
+                        <span>Escribes marca, modelo y el resto a mano.</span>
+                    </button>
+                    <button type="button"
+                            class="choice-card text-start @(_entryMode == EntryMode.VinDecode ? "is-selected" : null)"
+                            @onclick="@(() => _entryMode = EntryMode.VinDecode)">
+                        <strong>Decodificar VIN</strong>
+                        <span>Usa el VIN del vehículo donante para sugerir año, marca, modelo y más.</span>
+                    </button>
+                </div>
+            </div>
+
+            @if (_entryMode == EntryMode.VinDecode)
             {
-                <option value="@p.Id">@YardLayoutService.FormatPalletLabel(p)</option>
+                <div class="col-md-8">
+                    <label class="form-label">VIN del vehículo donante</label>
+                    <input class="form-control mono" maxlength="17" @bind="_model.SourceVin" @bind:event="oninput" placeholder="17 caracteres" />
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                    <button type="button" class="btn btn-outline-primary w-100" @onclick="DecodeVinAsync" disabled="@Busy.IsBusy">Decodificar VIN</button>
+                </div>
             }
-        </InputSelect>
-        <div class="form-text">Máx. 1 motor y 2 transmisiones por paleta; motor + transmisión permitido.</div>
-    </div>
-    <div class="row">
-        <div class="col-md-4 mb-3">
-            <label class="form-label">Marca</label>
-            <InputText class="form-control" @bind-Value="_model.Brand" />
+            else
+            {
+                <div class="col-md-6">
+                    <label class="form-label">VIN donante (opcional)</label>
+                    <input class="form-control mono" maxlength="17" @bind="_model.SourceVin" placeholder="Si lo tienes, puedes guardarlo" />
+                </div>
+            }
+
+            <div class="col-md-4">
+                <label class="form-label" for="brand-combo">Marca</label>
+                <SearchableCombo InputId="brand-combo"
+                                 Value="@_model.Brand"
+                                 ValueChanged="OnBrandChangedAsync"
+                                 Options="_brandOptions"
+                                 Placeholder="Escribe M… o elige de la lista"
+                                 AllowCustom="true" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label" for="model-combo">Modelo</label>
+                <SearchableCombo InputId="model-combo"
+                                 @bind-Value="_model.Model"
+                                 Options="_modelOptions"
+                                 Placeholder="@(string.IsNullOrWhiteSpace(_model.Brand) ? "Primero elige una marca" : (_loadingModels ? "Cargando modelos…" : "Escribe Foc… o elige"))"
+                                 EmptyHint="@(string.IsNullOrWhiteSpace(_model.Brand) ? "Primero elige una marca" : "Escribe para filtrar modelos")"
+                                 Disabled="@string.IsNullOrWhiteSpace(_model.Brand)"
+                                 AllowCustom="true"
+                                 MaxSuggestions="50" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Año</label>
+                <InputNumber class="form-control" @bind-Value="_model.Year" />
+            </div>
+
+            @if (_model.ItemType == InventoryItemType.Engine)
+            {
+                <div class="col-md-4">
+                    <label class="form-label" for="disp-combo">Cilindrada (litros) *</label>
+                    <SearchableCombo InputId="disp-combo"
+                                     Value="@DisplacementValue"
+                                     ValueChanged="OnDisplacementChangedAsync"
+                                     Options="_displacementOptions"
+                                     Placeholder="Ej. 2.5 — escribe o elige"
+                                     AllowCustom="true" />
+                    <div class="form-text">Ejemplos: 1.8, 2.0, 3.5, 5.7</div>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Nº de parte <span class="form-hint">(opcional)</span></label>
+                    <InputText class="form-control" @bind-Value="_model.PartNumber" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Descripción corta <span class="form-hint">(opcional)</span></label>
+                    <InputText class="form-control" @bind-Value="_model.Description" placeholder="Ej. motor completo" />
+                </div>
+            }
+            else
+            {
+                <div class="col-md-4">
+                    <label class="form-label" for="trans-combo">Tipo de transmisión *</label>
+                    <SearchableCombo InputId="trans-combo"
+                                     Value="@TransmissionValue"
+                                     ValueChanged="OnTransmissionChangedAsync"
+                                     Options="_transmissionOptions"
+                                     Placeholder="Automática o manual"
+                                     AllowCustom="false" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label" for="drive-combo">Tracción *</label>
+                    <SearchableCombo InputId="drive-combo"
+                                     Value="@DriveValue"
+                                     ValueChanged="OnDriveChangedAsync"
+                                     Options="_driveOptions"
+                                     Placeholder="FWD, RWD, AWD…"
+                                     AllowCustom="false" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Nº de parte <span class="form-hint">(opcional)</span></label>
+                    <InputText class="form-control" @bind-Value="_model.PartNumber" />
+                </div>
+                <div class="col-12">
+                    <label class="form-label">Descripción corta <span class="form-hint">(opcional)</span></label>
+                    <InputText class="form-control" @bind-Value="_model.Description" placeholder="Ej. caja automática 6 velocidades" />
+                </div>
+            }
+
+            <div class="col-md-6">
+                <label class="form-label">Foto <span class="form-hint">(opcional)</span></label>
+                <InputFile class="form-control" OnChange="OnImageSelected" accept=".jpg,.jpeg,.png,.webp,image/*" />
+                <div class="image-upload-hint">JPG/PNG/WEBP. Se guarda en disco (compatible Windows y Linux).</div>
+                @if (!string.IsNullOrEmpty(_imageName))
+                {
+                    <div class="form-hint mt-1">Seleccionado: @_imageName</div>
+                }
+            </div>
+
+            <div class="col-12">
+                <label class="form-label">Observaciones <span class="form-hint">(opcional)</span></label>
+                <InputTextArea class="form-control" @bind-Value="_model.Notes" rows="3" />
+            </div>
         </div>
-        <div class="col-md-4 mb-3">
-            <label class="form-label">Modelo</label>
-            <InputText class="form-control" @bind-Value="_model.Model" />
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary" disabled="@(_saving || Busy.IsBusy)">
+                @(_saving ? "Guardando…" : "Guardar pieza")
+            </button>
+            <a class="btn btn-link" href="inventory">Cancelar</a>
         </div>
-        <div class="col-md-4 mb-3">
-            <label class="form-label">Año</label>
-            <InputNumber class="form-control" @bind-Value="_model.Year" />
-        </div>
-    </div>
-    <div class="mb-3">
-        <label class="form-label">Nº de parte</label>
-        <InputText class="form-control" @bind-Value="_model.PartNumber" />
-    </div>
-    <div class="mb-3">
-        <label class="form-label">Descripción</label>
-        <InputText class="form-control" @bind-Value="_model.Description" />
-    </div>
-    <div class="mb-3">
-        <label class="form-label">Observaciones</label>
-        <InputTextArea class="form-control" @bind-Value="_model.Notes" />
-    </div>
-    <button type="submit" class="btn btn-primary" disabled="@_saving">Guardar</button>
-    <a class="btn btn-link" href="inventory">Cancelar</a>
-</EditForm>
+    </EditForm>
+</div>
 
 @code {
+    private static readonly IReadOnlyList<ComboOption> _transmissionOptions =
+    [
+        new(((int)TransmissionType.Automatic).ToString(), "Automática"),
+        new(((int)TransmissionType.Manual).ToString(), "Manual")
+    ];
+
+    private static readonly IReadOnlyList<ComboOption> _driveOptions =
+    [
+        new(((int)VehicleDriveType.Fwd).ToString(), "FWD"),
+        new(((int)VehicleDriveType.Rwd).ToString(), "RWD"),
+        new(((int)VehicleDriveType.Awd).ToString(), "AWD"),
+        new(((int)VehicleDriveType.FourByFour).ToString(), "4x4"),
+        new(((int)VehicleDriveType.FourByTwo).ToString(), "4x2")
+    ];
+
+    private static readonly IReadOnlyList<ComboOption> _displacementOptions =
+        new[] { "1.5", "1.6", "1.8", "2.0", "2.4", "2.5", "3.0", "3.5", "3.6", "4.0", "4.6", "5.0", "5.3", "5.7", "6.0", "6.2" }
+            .Select(v => new ComboOption(v, $"{v} L", v))
+            .ToList();
+
     private readonly CreateModel _model = new();
     private List<Pallet> _pallets = [];
+    private List<ComboOption> _palletOptions = [];
+    private List<ComboOption> _brandOptions = [];
+    private List<ComboOption> _modelOptions = [];
+    private CancellationTokenSource? _modelLoadCts;
+    private bool _loadingModels;
     private string? _error;
+    private string? _info;
     private bool _saving;
+    private EntryMode _entryMode = EntryMode.Manual;
+    private IBrowserFile? _imageFile;
+    private string? _imageName;
+
+    private string? PalletValue => _model.PalletId <= 0 ? null : _model.PalletId.ToString();
+    private string? TransmissionValue => _model.TransmissionType is null ? null : ((int)_model.TransmissionType.Value).ToString();
+    private string? DriveValue => _model.DriveType is null ? null : ((int)_model.DriveType.Value).ToString();
+    private string? DisplacementValue => _model.DisplacementLiters?.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     protected override async Task OnInitializedAsync()
     {
         try
         {
-            _pallets = await Layout.GetPalletsAsync(ZonePurpose.Parts);
+            await Busy.RunAsync(async () =>
+            {
+                _pallets = await Layout.GetPalletsAsync(ZonePurpose.Parts);
+                _palletOptions = _pallets
+                    .Select(p =>
+                    {
+                        var label = YardLayoutService.FormatPalletLabel(p);
+                        return new ComboOption(p.Id.ToString(), label, label);
+                    })
+                    .ToList();
+
+                var brands = await Inventory.GetDistinctBrandsAsync();
+                _brandOptions = brands.Select(b => new ComboOption(b, b)).ToList();
+                if (!string.IsNullOrWhiteSpace(_model.Brand))
+                    await ReloadModelOptionsAsync();
+            }, "Cargando formulario…");
         }
         catch (Exception ex)
         {
@@ -83,26 +260,289 @@
         }
     }
 
+    public void Dispose() => _modelLoadCts?.Cancel();
+
+    private void SetItemType(InventoryItemType type)
+    {
+        if (_model.ItemType == type) return;
+        _model.ItemType = type;
+        _info = null;
+        if (type == InventoryItemType.Engine)
+        {
+            _model.TransmissionType = null;
+            _model.DriveType = null;
+        }
+        else
+        {
+            _model.DisplacementLiters = null;
+        }
+    }
+
+    private Task OnPalletChangedAsync(string? value)
+    {
+        _model.PalletId = int.TryParse(value, out var id) ? id : 0;
+        return Task.CompletedTask;
+    }
+
+    private void OnImageSelected(InputFileChangeEventArgs e)
+    {
+        _imageFile = e.File;
+        _imageName = e.File?.Name;
+    }
+
+    private async Task OnBrandChangedAsync(string? value)
+    {
+        _model.Brand = value;
+        await ScheduleModelReloadAsync();
+    }
+
+    private Task OnTransmissionChangedAsync(string? value)
+    {
+        _model.TransmissionType = int.TryParse(value, out var n) ? (TransmissionType)n : null;
+        return Task.CompletedTask;
+    }
+
+    private Task OnDriveChangedAsync(string? value)
+    {
+        _model.DriveType = int.TryParse(value, out var n) ? (VehicleDriveType)n : null;
+        return Task.CompletedTask;
+    }
+
+    private Task OnDisplacementChangedAsync(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            _model.DisplacementLiters = null;
+            return Task.CompletedTask;
+        }
+
+        _model.DisplacementLiters = decimal.TryParse(
+            value.Replace(',', '.'),
+            System.Globalization.NumberStyles.Number,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out var liters)
+            ? Math.Round(liters, 1, MidpointRounding.AwayFromZero)
+            : null;
+        return Task.CompletedTask;
+    }
+
+    private async Task ScheduleModelReloadAsync()
+    {
+        _modelLoadCts?.Cancel();
+        _modelLoadCts = new CancellationTokenSource();
+        var ct = _modelLoadCts.Token;
+
+        try
+        {
+            await Task.Delay(350, ct);
+            await ReloadModelOptionsAsync(ct);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException)
+        {
+            // Newer brand keystroke superseded this load.
+        }
+    }
+
+    private async Task ReloadModelOptionsAsync(CancellationToken ct = default)
+    {
+        var brand = _model.Brand?.Trim();
+        if (string.IsNullOrWhiteSpace(brand))
+        {
+            _modelOptions = [];
+            _loadingModels = false;
+            return;
+        }
+
+        _loadingModels = true;
+        try
+        {
+            List<string> fromDb = [];
+            try
+            {
+                fromDb = await Inventory.GetDistinctModelsAsync(brand, ct);
+            }
+            catch
+            {
+                // Keep going with NHTSA / free text.
+            }
+
+            IReadOnlyList<string> fromApi = [];
+            try
+            {
+                fromApi = await VinLookup.GetModelsForMakeAsync(brand, ct);
+            }
+            catch
+            {
+                fromApi = [];
+            }
+
+            var merged = fromApi
+                .Concat(fromDb)
+                .Where(m => !string.IsNullOrWhiteSpace(m))
+                .Select(m => m.Trim())
+                .GroupBy(m => m, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .OrderBy(m => m, StringComparer.OrdinalIgnoreCase)
+                .Select(m => new ComboOption(m, m))
+                .ToList();
+
+            if (!string.IsNullOrWhiteSpace(_model.Model)
+                && !merged.Any(o => string.Equals(o.Value, _model.Model, StringComparison.OrdinalIgnoreCase)))
+            {
+                merged.Insert(0, new ComboOption(_model.Model!, _model.Model!));
+            }
+
+            _modelOptions = merged;
+        }
+        catch
+        {
+            _modelOptions = [];
+        }
+        finally
+        {
+            _loadingModels = false;
+        }
+    }
+
+    private async Task DecodeVinAsync()
+    {
+        if (Busy.IsBusy) return;
+        _error = null;
+        _info = null;
+
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                VinDecodeResult result;
+                try
+                {
+                    result = await VinLookup.DecodeAsync(_model.SourceVin);
+                }
+                catch (Exception ex)
+                {
+                    _error = $"No se pudo decodificar el VIN: {ex.Message}";
+                    return;
+                }
+
+                try
+                {
+                    await ApplyVinDecodeAsync(result);
+                }
+                catch (Exception ex)
+                {
+                    _error = $"Se obtuvo el VIN pero falló al aplicar los datos: {ex.Message}";
+                }
+            }, "Decodificando VIN…");
+        }
+        catch (Exception ex)
+        {
+            _error = $"No se pudo decodificar el VIN: {ex.Message}";
+        }
+    }
+
+    private async Task ApplyVinDecodeAsync(VinDecodeResult result)
+    {
+        if (!string.IsNullOrWhiteSpace(result.Vin))
+            _model.SourceVin = result.Vin;
+
+        if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
+        {
+            _error = result.ErrorMessage;
+            return;
+        }
+
+        if (!result.HasAnyData)
+        {
+            _info = result.Warning
+                    ?? "No se pudo decodificar este VIN. Completa los campos manualmente.";
+            return;
+        }
+
+        if (result.Year is not null)
+            _model.Year = result.Year;
+        if (!string.IsNullOrWhiteSpace(result.Make))
+            _model.Brand = result.Make;
+        if (!string.IsNullOrWhiteSpace(result.Model))
+            _model.Model = result.Model;
+
+        if (_model.ItemType == InventoryItemType.Engine)
+        {
+            if (result.DisplacementLiters is not null)
+                _model.DisplacementLiters = result.DisplacementLiters;
+        }
+        else
+        {
+            if (result.TransmissionType is not null)
+                _model.TransmissionType = result.TransmissionType;
+            if (result.DriveType is not null)
+                _model.DriveType = result.DriveType;
+        }
+
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_model.Description)
+                && !string.IsNullOrWhiteSpace(result.SuggestedDescription))
+            {
+                _model.Description = result.SuggestedDescription;
+            }
+        }
+        catch
+        {
+            // Description seed is optional.
+        }
+
+        await ReloadModelOptionsAsync();
+
+        _info = result.FromNhtsa
+            ? "Se sugirieron campos desde el VIN (NHTSA). Revísalos y completa el resto."
+            : result.Warning
+              ?? "Solo se pudo sugerir año/marca de forma local. Completa el resto manualmente.";
+    }
+
     private async Task SaveAsync()
     {
+        if (Busy.IsBusy || _saving) return;
         _error = null;
         _saving = true;
         try
         {
-            if (_model.PalletId <= 0)
-                throw new InvalidOperationException("Seleccione una paleta.");
+            await Busy.RunAsync(async () =>
+            {
+                if (_model.PalletId <= 0)
+                    throw new InvalidOperationException("Seleccione una paleta.");
 
-            await Inventory.AddAsync(
-                _model.ItemType,
-                _model.PartNumber,
-                _model.Brand,
-                _model.Model,
-                _model.Year,
-                _model.Description,
-                _model.Notes,
-                _model.PalletId);
+                var created = await Inventory.AddAsync(
+                    _model.ItemType,
+                    _model.PartNumber,
+                    _model.Brand,
+                    _model.Model,
+                    _model.Year,
+                    _model.Description,
+                    _model.Notes,
+                    _model.PalletId,
+                    _model.SourceVin,
+                    _model.DisplacementLiters,
+                    _model.TransmissionType,
+                    _model.DriveType);
 
-            Nav.NavigateTo("inventory");
+                if (_imageFile is not null)
+                {
+                    try
+                    {
+                        await using var stream = _imageFile.OpenReadStream(maxAllowedSize: 8 * 1024 * 1024);
+                        var path = await Media.SaveAsync(stream, _imageFile.Name, "parts", created.Id, _model.Brand);
+                        await Inventory.SetImagePathAsync(created.Id, path);
+                    }
+                    catch (Exception imgEx)
+                    {
+                        _info = $"Pieza guardada, pero la foto falló: {imgEx.Message}";
+                    }
+                }
+
+                Nav.NavigateTo("inventory");
+            }, "Guardando pieza…");
         }
         catch (Exception ex)
         {
@@ -114,13 +554,23 @@
         }
     }
 
+    private enum EntryMode
+    {
+        Manual,
+        VinDecode
+    }
+
     private sealed class CreateModel
     {
         public InventoryItemType ItemType { get; set; } = InventoryItemType.Engine;
         public int PalletId { get; set; }
+        public string? SourceVin { get; set; }
         public string? Brand { get; set; }
         public string? Model { get; set; }
         public int? Year { get; set; }
+        public decimal? DisplacementLiters { get; set; }
+        public TransmissionType? TransmissionType { get; set; }
+        public VehicleDriveType? DriveType { get; set; }
         public string? PartNumber { get; set; }
         public string? Description { get; set; }
         public string? Notes { get; set; }

@@ -1,5 +1,7 @@
 using RSYInventory.Data;
+using RSYInventory.Data.Services;
 using RSYInventory.Web.Components;
+using RSYInventory.Web.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -15,6 +17,9 @@ var connectionString = builder.Configuration.GetConnectionString("YardInventory"
         "Falta ConnectionStrings:YardInventory. Configúrala en appsettings / User Secrets.");
 
 builder.Services.AddYardInventoryData(connectionString);
+builder.Services.AddScoped<IUserSessionStore, ProtectedUserSessionStore>();
+builder.Services.AddScoped<UiBusyService>();
+builder.Services.AddSingleton<MediaStorageService>();
 
 var app = builder.Build();
 

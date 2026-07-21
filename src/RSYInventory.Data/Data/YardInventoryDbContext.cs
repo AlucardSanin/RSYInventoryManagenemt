@@ -12,6 +12,8 @@ public partial class YardInventoryDbContext : DbContext
     {
     }
 
+    public virtual DbSet<AuditEvent> AuditEvents { get; set; }
+
     public virtual DbSet<InventoryItem> InventoryItems { get; set; }
 
     public virtual DbSet<InventoryMovement> InventoryMovements { get; set; }
@@ -32,6 +34,22 @@ public partial class YardInventoryDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<AuditEvent>(entity =>
+        {
+            entity.HasIndex(e => e.CreatedAtUtc, "IX_AuditEvents_CreatedAtUtc").IsDescending();
+            entity.HasIndex(e => e.UserId, "IX_AuditEvents_UserId");
+            entity.HasIndex(e => e.EventType, "IX_AuditEvents_EventType");
+            entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.EventType).HasMaxLength(80);
+            entity.Property(e => e.EntityType).HasMaxLength(80);
+            entity.Property(e => e.Summary).HasMaxLength(500);
+            entity.Property(e => e.Details).HasMaxLength(2000);
+            entity.HasOne(d => d.User).WithMany(p => p.AuditEvents)
+                .HasForeignKey(d => d.UserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_AuditEvents_Users");
+        });
+
         modelBuilder.Entity<InventoryItem>(entity =>
         {
             entity.HasIndex(e => e.ItemType, "IX_InventoryItems_ItemType");
@@ -43,10 +61,17 @@ public partial class YardInventoryDbContext : DbContext
             entity.Property(e => e.Brand).HasMaxLength(100);
             entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.Description).HasMaxLength(500);
+            entity.Property(e => e.DisplacementLiters).HasPrecision(4, 2);
+            entity.Property(e => e.ImageRelativePath).HasMaxLength(400);
             entity.Property(e => e.Model).HasMaxLength(100);
             entity.Property(e => e.Notes).HasMaxLength(2000);
             entity.Property(e => e.PartNumber).HasMaxLength(100);
+            entity.Property(e => e.SourceVin).HasMaxLength(17);
             entity.Property(e => e.Status).HasDefaultValue(1);
+
+            entity.HasOne(d => d.CreatedByUser).WithMany(p => p.CreatedInventoryItems)
+                .HasForeignKey(d => d.CreatedByUserId)
+                .HasConstraintName("FK_InventoryItems_CreatedByUser");
 
             entity.HasOne(d => d.Pallet).WithMany(p => p.InventoryItems)
                 .HasForeignKey(d => d.PalletId)
@@ -131,6 +156,7 @@ public partial class YardInventoryDbContext : DbContext
             entity.Property(e => e.DisplayName).HasMaxLength(200);
             entity.Property(e => e.Email).HasMaxLength(256);
             entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.PasswordHash).HasMaxLength(500);
             entity.Property(e => e.UserName).HasMaxLength(100);
 
             entity.HasMany(d => d.Roles).WithMany(p => p.Users)
@@ -156,9 +182,11 @@ public partial class YardInventoryDbContext : DbContext
             entity.HasIndex(e => e.Vin, "UQ_Vehicles_Vin").IsUnique();
 
             entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.ImageRelativePath).HasMaxLength(400);
             entity.Property(e => e.Make).HasMaxLength(100);
             entity.Property(e => e.Model).HasMaxLength(100);
             entity.Property(e => e.Observations).HasMaxLength(2000);
+            entity.Property(e => e.PurchasePrice).HasPrecision(12, 2);
             entity.Property(e => e.Vin).HasMaxLength(17);
 
             entity.HasOne(d => d.AcquiredByUser).WithMany(p => p.Vehicles)

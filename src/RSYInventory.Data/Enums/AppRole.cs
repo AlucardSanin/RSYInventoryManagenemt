@@ -15,5 +15,8 @@ public enum AppRole
     ZoneManager = 3,
 
     /// <summary>Can register newly acquired vehicles (VIN, source, etc.). Does not assign yard location.</summary>
-    VehicleAcquirer = 4
+    VehicleAcquirer = 4,
+
+    /// <summary>God / system admin: create users and assign roles. Demo user has this role.</summary>
+    SystemAdmin = 5
 }

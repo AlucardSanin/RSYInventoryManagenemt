@@ -10,7 +10,7 @@ SET ANSI_NULLS ON;
 SET QUOTED_IDENTIFIER ON;
 GO
 
-/* Demo user (Id = 1) used by DevCurrentUserService for local VS debugging */
+/* Demo / god user (Id = 1). Password set in 003_UserAuthAndSystemAdmin.sql (demo/demo). */
 SET IDENTITY_INSERT dbo.Users ON;
 MERGE dbo.Users AS target
 USING (VALUES
@@ -25,7 +25,7 @@ GO
 
 MERGE dbo.UserRoles AS target
 USING (VALUES
-    (1, 1), (1, 2), (1, 3), (1, 4)
+    (1, 1), (1, 2), (1, 3), (1, 4), (1, 5)
 ) AS source (UserId, RoleId)
 ON target.UserId = source.UserId AND target.RoleId = source.RoleId
 WHEN NOT MATCHED THEN

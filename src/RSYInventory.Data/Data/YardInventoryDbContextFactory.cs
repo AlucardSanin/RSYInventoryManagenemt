@@ -14,7 +14,7 @@ public class YardInventoryDbContextFactory : IDesignTimeDbContextFactory<YardInv
     {
         var optionsBuilder = new DbContextOptionsBuilder<YardInventoryDbContext>();
         optionsBuilder.UseSqlServer(
-            "Server=.\\MSSQLSERVER01;Database=RSYYardInventory;Trusted_Connection=True;TrustServerCertificate=True;");
+            "Server=np:\\\\.\\pipe\\MSSQL$MSSQLSERVER01\\sql\\query;Database=RSYYardInventory;Trusted_Connection=True;TrustServerCertificate=True;Encrypt=False;Connect Timeout=30;");
 
         return new YardInventoryDbContext(optionsBuilder.Options);
     }
