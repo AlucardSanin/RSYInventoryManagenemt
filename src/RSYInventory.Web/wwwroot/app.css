@@ -483,6 +483,51 @@ code, .mono {
     box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22);
 }
 
+.public-shell {
+    min-height: 100vh;
+    background:
+        radial-gradient(1200px 500px at 10% -10%, #e0f2fe 0%, transparent 55%),
+        radial-gradient(900px 420px at 100% 0%, #ecfdf5 0%, transparent 50%),
+        #f8fafc;
+}
+
+.public-shell__header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.85rem 1.25rem;
+    border-bottom: 1px solid var(--rsy-line);
+    background: rgba(255, 255, 255, 0.9);
+    backdrop-filter: blur(6px);
+}
+
+.public-shell__brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    color: var(--rsy-ink);
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.public-shell__brand img {
+    border-radius: 0.35rem;
+}
+
+.public-shell__nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+}
+
+.public-shell__main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 1.25rem 1rem 2.5rem;
+}
+
 /* Busy overlay — blocks double-clicks while async work runs */
 .busy-overlay {
     position: fixed;

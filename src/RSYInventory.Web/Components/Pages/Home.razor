@@ -9,9 +9,12 @@
 
 @if (!CurrentUser.IsAuthenticated)
 {
-    <div class="page-panel">
-        <p class="mb-2">Debes iniciar sesión para trabajar en la yarda.</p>
-        <a class="btn btn-primary" href="login">Iniciar sesión</a>
+    <div class="page-panel mb-3">
+        <p class="mb-2">Puedes consultar piezas disponibles sin cuenta, o iniciar sesión para trabajar en la yarda.</p>
+        <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-primary" href="buscar">Buscar inventario</a>
+            <a class="btn btn-outline-secondary" href="login">Iniciar sesión</a>
+        </div>
     </div>
 }
 else

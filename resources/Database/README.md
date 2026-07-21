@@ -6,6 +6,7 @@ This folder holds the SQL Server scripts that define and evolve the yard invento
 |------|-------------|
 | `001_InitialSchema.sql` | Creates tables, indexes, constraints, and seed data (roles, vehicle sources, Zona A / Zona B). |
 | `002_DemoUserAndPartsZone.sql` | Demo user (all roles) + Zona Partes for engines/transmissions. |
+| `008_SampleVehiclesAndParts.sql` | Sample vehicles + engines/transmissions (no users). Safe to re-run. |
 
 ## Workflow
 
