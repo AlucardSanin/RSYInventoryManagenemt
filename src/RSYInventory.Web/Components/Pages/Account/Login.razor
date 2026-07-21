@@ -12,7 +12,7 @@
         <p class="page-header__eyebrow mb-0">RSY Yard Inventory</p>
     </div>
     <h1 class="page-header__title mb-2">Iniciar sesión</h1>
-    <p class="page-header__lead mb-3">Entra con tu usuario. El god <code>demo</code> puede crear más cuentas.</p>
+    <p class="page-header__lead mb-3">Entra con tu usuario.</p>
 
     @if (!string.IsNullOrEmpty(_error))
     {
@@ -34,13 +34,12 @@
     </EditForm>
 
     <p class="form-hint mt-3 mb-0">
-        God: <code>demo</code> / <code>demo</code>
-        · Script: <code>003_UserAuthAndSystemAdmin.sql</code>
+        Si no tienes cuenta contacta al administrador
     </p>
 </div>
 
 @code {
-    private readonly LoginModel _model = new() { UserName = "demo" };
+    private readonly LoginModel _model = new() { UserName = "" };
     private string? _error;
     private bool _busy;
 
