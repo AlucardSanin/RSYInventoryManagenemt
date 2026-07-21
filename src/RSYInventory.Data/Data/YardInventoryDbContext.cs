@@ -28,6 +28,8 @@ public partial class YardInventoryDbContext : DbContext
 
     public virtual DbSet<Vehicle> Vehicles { get; set; }
 
+    public virtual DbSet<VehicleImage> VehicleImages { get; set; }
+
     public virtual DbSet<VehicleSource> VehicleSources { get; set; }
 
     public virtual DbSet<Zone> Zones { get; set; }
@@ -202,6 +204,20 @@ public partial class YardInventoryDbContext : DbContext
                 .HasForeignKey(d => d.VehicleSourceId)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_Vehicles_VehicleSources");
+        });
+
+        modelBuilder.Entity<VehicleImage>(entity =>
+        {
+            entity.HasIndex(e => new { e.VehicleId, e.SortOrder, e.Id }, "IX_VehicleImages_VehicleId_SortOrder");
+
+            entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.RelativePath).HasMaxLength(400);
+            entity.Property(e => e.SortOrder).HasDefaultValue(0);
+
+            entity.HasOne(d => d.Vehicle).WithMany(p => p.Images)
+                .HasForeignKey(d => d.VehicleId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_VehicleImages_Vehicles");
         });
 
         modelBuilder.Entity<VehicleSource>(entity =>

@@ -63,6 +63,7 @@ public class VehicleService
             .AsNoTracking()
             .Include(v => v.VehicleSource)
             .Include(v => v.AcquiredByUser)
+            .Include(v => v.Images)
             .Include(v => v.Pallet)!.ThenInclude(p => p!.Row)!.ThenInclude(r => r!.Zone)
             .OrderByDescending(v => v.AcquiredAt)
             .ToListAsync(ct);
@@ -73,6 +74,7 @@ public class VehicleService
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         return await db.Vehicles
             .Include(v => v.VehicleSource)
+            .Include(v => v.Images)
             .Include(v => v.Pallet)!.ThenInclude(p => p!.Row)!.ThenInclude(r => r!.Zone)
             .FirstOrDefaultAsync(v => v.Id == id, ct);
     }
@@ -146,11 +148,83 @@ public class VehicleService
             throw new UnauthorizedAccessException("No tiene permiso para actualizar vehículos.");
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var vehicle = await db.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+        var vehicle = await db.Vehicles
+            .Include(v => v.Images)
+            .FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
             ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
         vehicle.ImageRelativePath = relativePath;
         vehicle.UpdatedAtUtc = DateTime.UtcNow;
+
+        if (!string.IsNullOrWhiteSpace(relativePath)
+            && !vehicle.Images.Any(i => string.Equals(i.RelativePath, relativePath, StringComparison.OrdinalIgnoreCase)))
+        {
+            var nextOrder = vehicle.Images.Count == 0 ? 0 : vehicle.Images.Max(i => i.SortOrder) + 1;
+            db.VehicleImages.Add(new VehicleImage
+            {
+                VehicleId = vehicleId,
+                RelativePath = relativePath,
+                SortOrder = nextOrder,
+                CreatedAtUtc = DateTime.UtcNow
+            });
+        }
+
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>Appends a photo to the vehicle gallery and keeps ImageRelativePath as the cover (first) image.</summary>
+    public async Task AddImageAsync(int vehicleId, string relativePath, CancellationToken ct = default)
+    {
+        if (!_currentUser.CanAcquireVehicles && !_currentUser.CanEditInventory)
+            throw new UnauthorizedAccessException("No tiene permiso para actualizar vehículos.");
+
+        if (string.IsNullOrWhiteSpace(relativePath))
+            throw new InvalidOperationException("Ruta de imagen inválida.");
+
+        relativePath = relativePath.Trim();
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var vehicle = await db.Vehicles
+            .Include(v => v.Images)
+            .FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+            ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+        if (vehicle.Images.Any(i => string.Equals(i.RelativePath, relativePath, StringComparison.OrdinalIgnoreCase)))
+            return;
+
+        var nextOrder = vehicle.Images.Count == 0 ? 0 : vehicle.Images.Max(i => i.SortOrder) + 1;
+        db.VehicleImages.Add(new VehicleImage
+        {
+            VehicleId = vehicleId,
+            RelativePath = relativePath,
+            SortOrder = nextOrder,
+            CreatedAtUtc = DateTime.UtcNow
+        });
+
+        if (string.IsNullOrWhiteSpace(vehicle.ImageRelativePath))
+            vehicle.ImageRelativePath = relativePath;
+
+        vehicle.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>Ordered gallery paths (falls back to legacy ImageRelativePath when gallery is empty).</summary>
+    public static IReadOnlyList<string> GetImagePaths(Vehicle vehicle)
+    {
+        var fromGallery = (vehicle.Images ?? [])
+            .OrderBy(i => i.SortOrder)
+            .ThenBy(i => i.Id)
+            .Select(i => i.RelativePath)
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (fromGallery.Count > 0)
+            return fromGallery;
+
+        return string.IsNullOrWhiteSpace(vehicle.ImageRelativePath)
+            ? []
+            : [vehicle.ImageRelativePath];
     }
 
     public async Task AssignLocationAsync(int vehicleId, int palletId, string? notes, CancellationToken ct = default)

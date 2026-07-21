@@ -11,7 +11,7 @@
 
 <PageHeader Title="Registrar vehículo adquirido"
             Eyebrow="Vehículos"
-            Lead="El VIN es obligatorio. Puedes decodificarlo para sugerir año, marca, modelo y más, o completar todo a mano.">
+            Lead="Ingresa el VIN y decodifícalo para sugerir año, marca y modelo. Si no hay resultado, puedes completar esos campos a mano.">
     <a class="btn btn-outline-secondary" href="vehicles">Volver a vehículos</a>
 </PageHeader>
 
@@ -27,38 +27,28 @@
 <div class="page-panel">
     <EditForm Model="_model" OnValidSubmit="SaveAsync">
         <div class="row g-3">
-            <div class="col-12">
-                <label class="form-label d-block mb-2">Cómo quieres cargar los datos</label>
-                <div class="choice-cards">
-                    <button type="button"
-                            class="choice-card text-start @(_entryMode == EntryMode.VinDecode ? "is-selected" : null)"
-                            @onclick="@(() => _entryMode = EntryMode.VinDecode)">
-                        <strong>Decodificar VIN</strong>
-                        <span>Ingresas el VIN y se sugieren año, marca, modelo y más.</span>
-                    </button>
-                    <button type="button"
-                            class="choice-card text-start @(_entryMode == EntryMode.Manual ? "is-selected" : null)"
-                            @onclick="@(() => _entryMode = EntryMode.Manual)">
-                        <strong>Manual</strong>
-                        <span>Escribes año, marca y modelo tú mismo (el VIN sigue siendo obligatorio).</span>
-                    </button>
-                </div>
-            </div>
-
             <div class="col-md-8">
                 <label class="form-label">VIN *</label>
                 <InputText class="form-control mono" @bind-Value="_model.Vin" maxlength="17" placeholder="17 caracteres" />
             </div>
-            <div class="col-md-4 d-flex align-items-end">
-                @if (_entryMode == EntryMode.VinDecode)
+            <div class="col-md-4 d-flex flex-column justify-content-end">
+                <button type="button" class="btn btn-outline-primary w-100" @onclick="DecodeVinAsync" disabled="@Busy.IsBusy">Decodificar VIN</button>
+                @if (!string.IsNullOrEmpty(_vinHint))
                 {
-                    <button type="button" class="btn btn-outline-primary w-100" @onclick="DecodeVinAsync" disabled="@Busy.IsBusy">Decodificar VIN</button>
+                    <div class="vin-hint">@_vinHint</div>
                 }
             </div>
 
             <div class="col-md-3">
-                <label class="form-label">Año</label>
-                <InputNumber class="form-control" @bind-Value="_model.Year" />
+                <label class="form-label" for="year-combo">Año</label>
+                <SearchableCombo InputId="year-combo"
+                                 Value="@YearValue"
+                                 ValueChanged="OnYearChangedAsync"
+                                 Options="_yearOptions"
+                                 Placeholder="Escribe 201… o elige"
+                                 EmptyHint="Elige un año de la lista"
+                                 AllowCustom="false"
+                                 MaxSuggestions="20" />
             </div>
             <div class="col-md-3">
                 <label class="form-label" for="make-combo">Marca</label>
@@ -66,7 +56,9 @@
                                  Value="@_model.Make"
                                  ValueChanged="OnMakeChangedAsync"
                                  Options="_makeOptions"
-                                 Placeholder="Escribe M… o elige"
+                                 Placeholder="@(_model.Year is null ? "Primero elige un año" : "Escribe M… o elige")"
+                                 EmptyHint="@(_model.Year is null ? "Primero elige un año" : "Escribe para filtrar marcas")"
+                                 Disabled="@(_model.Year is null)"
                                  AllowCustom="true" />
             </div>
             <div class="col-md-3">
@@ -74,8 +66,8 @@
                 <SearchableCombo InputId="model-combo"
                                  @bind-Value="_model.Model"
                                  Options="_modelOptions"
-                                 Placeholder="@(string.IsNullOrWhiteSpace(_model.Make) ? "Primero elige una marca" : (_loadingModels ? "Cargando modelos…" : "Escribe Foc… o elige"))"
-                                 EmptyHint="@(string.IsNullOrWhiteSpace(_model.Make) ? "Primero elige una marca" : "Escribe para filtrar modelos")"
+                                 Placeholder="@ModelPlaceholder"
+                                 EmptyHint="@ModelEmptyHint"
                                  Disabled="@string.IsNullOrWhiteSpace(_model.Make)"
                                  AllowCustom="true"
                                  MaxSuggestions="50" />
@@ -120,12 +112,12 @@
                 <InputDate class="form-control" @bind-Value="_model.AcquiredAt" />
             </div>
             <div class="col-md-4">
-                <label class="form-label">Foto <span class="form-hint">(opcional)</span></label>
-                <InputFile class="form-control" OnChange="OnImageSelected" accept=".jpg,.jpeg,.png,.webp,image/*" />
-                <div class="image-upload-hint">JPG/PNG/WEBP · se guarda en disco.</div>
-                @if (!string.IsNullOrEmpty(_imageName))
+                <label class="form-label">Fotos <span class="form-hint">(opcional)</span></label>
+                <InputFile class="form-control" OnChange="OnImagesSelected" accept=".jpg,.jpeg,.png,.webp,image/*" multiple />
+                <div class="image-upload-hint">JPG/PNG/WEBP · puedes seleccionar varias.</div>
+                @if (_imageFiles.Count > 0)
                 {
-                    <div class="form-hint mt-1">@_imageName</div>
+                    <div class="form-hint mt-1">@_imageFiles.Count foto(s): @string.Join(", ", _imageFiles.Select(f => f.Name))</div>
                 }
             </div>
             <div class="col-md-8">
@@ -159,6 +151,9 @@
         new(((int)VehicleDriveType.FourByTwo).ToString(), "4x2")
     ];
 
+    private static readonly IReadOnlyList<ComboOption> _yearOptions =
+        VehicleYearCatalog.AllYears.Select(y => new ComboOption(y, y)).ToList();
+
     private readonly AcquireModel _model = new() { AcquiredAt = DateTime.Today };
     private List<VehicleSource> _sources = [];
     private List<ComboOption> _sourceOptions = [];
@@ -168,14 +163,25 @@
     private bool _loadingModels;
     private string? _error;
     private string? _info;
+    private string? _vinHint;
     private bool _saving;
-    private EntryMode _entryMode = EntryMode.VinDecode;
-    private IBrowserFile? _imageFile;
-    private string? _imageName;
+    private readonly List<IBrowserFile> _imageFiles = [];
 
+    private string? YearValue => _model.Year?.ToString();
     private string? TransmissionValue => _model.TransmissionType is null ? null : ((int)_model.TransmissionType.Value).ToString();
     private string? DriveValue => _model.DriveType is null ? null : ((int)_model.DriveType.Value).ToString();
     private string? SourceValue => _model.VehicleSourceId <= 0 ? null : _model.VehicleSourceId.ToString();
+
+    private string ModelPlaceholder =>
+        _model.Year is null ? "Primero elige un año"
+        : string.IsNullOrWhiteSpace(_model.Make) ? "Primero elige una marca"
+        : _loadingModels ? "Cargando modelos…"
+        : "Escribe Foc… o elige";
+
+    private string ModelEmptyHint =>
+        _model.Year is null ? "Primero elige un año"
+        : string.IsNullOrWhiteSpace(_model.Make) ? "Primero elige una marca"
+        : "Escribe para filtrar modelos";
 
     protected override async Task OnInitializedAsync()
     {
@@ -188,7 +194,7 @@
 
                 var makes = await Vehicles.GetDistinctMakesAsync();
                 _makeOptions = makes.Select(m => new ComboOption(m, m)).ToList();
-                if (!string.IsNullOrWhiteSpace(_model.Make))
+                if (!string.IsNullOrWhiteSpace(_model.Make) && _model.Year is not null)
                     await ReloadModelOptionsAsync();
             }, "Cargando formulario…");
         }
@@ -200,15 +206,33 @@
 
     public void Dispose() => _modelLoadCts?.Cancel();
 
-    private void OnImageSelected(InputFileChangeEventArgs e)
+    private void OnImagesSelected(InputFileChangeEventArgs e)
     {
-        _imageFile = e.File;
-        _imageName = e.File?.Name;
+        _imageFiles.Clear();
+        _imageFiles.AddRange(e.GetMultipleFiles(12));
+    }
+
+    private async Task OnYearChangedAsync(string? value)
+    {
+        var previous = _model.Year;
+        _model.Year = int.TryParse(value, out var y) ? y : null;
+
+        if (_model.Year != previous)
+        {
+            _model.Make = null;
+            _model.Model = null;
+            _modelOptions = [];
+        }
+
+        await Task.CompletedTask;
     }
 
     private async Task OnMakeChangedAsync(string? value)
     {
+        var previous = _model.Make;
         _model.Make = value;
+        if (!string.Equals(previous, value, StringComparison.OrdinalIgnoreCase))
+            _model.Model = null;
         await ScheduleModelReloadAsync();
     }
 
@@ -251,7 +275,7 @@
     private async Task ReloadModelOptionsAsync(CancellationToken ct = default)
     {
         var make = _model.Make?.Trim();
-        if (string.IsNullOrWhiteSpace(make))
+        if (string.IsNullOrWhiteSpace(make) || _model.Year is null)
         {
             _modelOptions = [];
             _loadingModels = false;
@@ -274,15 +298,17 @@
             IReadOnlyList<string> fromApi = [];
             try
             {
-                fromApi = await VinLookup.GetModelsForMakeAsync(make, ct);
+                fromApi = await VinLookup.GetModelsForMakeAsync(make, _model.Year, ct);
             }
             catch
             {
                 fromApi = [];
             }
 
-            var merged = fromApi
-                .Concat(fromDb)
+            // Prefer year-filtered API list when available so out-of-year models stay out.
+            IEnumerable<string> mergedSource = fromApi.Count > 0 ? fromApi : fromDb;
+
+            var merged = mergedSource
                 .Where(m => !string.IsNullOrWhiteSpace(m))
                 .Select(m => m.Trim())
                 .GroupBy(m => m, StringComparer.OrdinalIgnoreCase)
@@ -314,6 +340,7 @@
         if (Busy.IsBusy) return;
         _error = null;
         _info = null;
+        _vinHint = null;
 
         try
         {
@@ -327,6 +354,7 @@
                 catch (Exception ex)
                 {
                     _error = $"No se pudo decodificar el VIN: {ex.Message}";
+                    _vinHint = "¿Está bien el VIN?";
                     return;
                 }
 
@@ -337,12 +365,14 @@
                 catch (Exception ex)
                 {
                     _error = $"Se obtuvo el VIN pero falló al aplicar los datos: {ex.Message}";
+                    _vinHint = "¿Está bien el VIN?";
                 }
             }, "Decodificando VIN…");
         }
         catch (Exception ex)
         {
             _error = $"No se pudo decodificar el VIN: {ex.Message}";
+            _vinHint = "¿Está bien el VIN?";
         }
     }
 
@@ -354,13 +384,15 @@
         if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
         {
             _error = result.ErrorMessage;
+            _vinHint = "¿Está bien el VIN?";
             return;
         }
 
         if (!result.HasAnyData)
         {
             _info = result.Warning
-                    ?? "No se pudo decodificar este VIN. Completa los campos manualmente.";
+                    ?? "No se pudo decodificar este VIN. Completa año, marca y modelo manualmente.";
+            _vinHint = "¿Está bien el VIN?";
             return;
         }
 
@@ -377,6 +409,7 @@
 
         await ReloadModelOptionsAsync();
 
+        _vinHint = null;
         _info = result.FromNhtsa
             ? "Se sugirieron campos desde el VIN (NHTSA). Puedes corregirlos."
             : result.Warning
@@ -408,18 +441,25 @@
                     _model.VehicleSourceId,
                     _model.AcquiredAt);
 
-                if (_imageFile is not null)
+                if (_imageFiles.Count > 0)
                 {
-                    try
+                    var failed = 0;
+                    foreach (var file in _imageFiles)
                     {
-                        await using var stream = _imageFile.OpenReadStream(maxAllowedSize: 8 * 1024 * 1024);
-                        var path = await Media.SaveAsync(stream, _imageFile.Name, "vehicles", created.Id, _model.Make);
-                        await Vehicles.SetImagePathAsync(created.Id, path);
+                        try
+                        {
+                            await using var stream = file.OpenReadStream(maxAllowedSize: 8 * 1024 * 1024);
+                            var path = await Media.SaveAsync(stream, file.Name, "vehicles", created.Id, _model.Make);
+                            await Vehicles.AddImageAsync(created.Id, path);
+                        }
+                        catch
+                        {
+                            failed++;
+                        }
                     }
-                    catch (Exception imgEx)
-                    {
-                        _info = $"Vehículo guardado, pero la foto falló: {imgEx.Message}";
-                    }
+
+                    if (failed > 0)
+                        _info = $"Vehículo guardado, pero {failed} foto(s) no se pudieron subir.";
                 }
 
                 Nav.NavigateTo("vehicles");
@@ -433,12 +473,6 @@
         {
             _saving = false;
         }
-    }
-
-    private enum EntryMode
-    {
-        Manual,
-        VinDecode
     }
 
     private sealed class AcquireModel

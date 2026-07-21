@@ -20,6 +20,9 @@ public sealed class VinLookupService(HttpClient http)
     private static readonly ConcurrentDictionary<string, IReadOnlyList<string>> ModelsByMakeCache =
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>NHTSA GetModelsForMakeYear is documented for years after 1995.</summary>
+    private const int NhtsaMakeYearMin = 1995;
+
     public async Task<VinDecodeResult> DecodeAsync(string? vin, CancellationToken cancellationToken = default)
     {
         string normalized;
@@ -61,8 +64,19 @@ public sealed class VinLookupService(HttpClient http)
     /// <summary>
     /// Models for a make from NHTSA (cached). Never throws — returns empty on failure.
     /// </summary>
+    public Task<IReadOnlyList<string>> GetModelsForMakeAsync(
+        string? make,
+        CancellationToken cancellationToken = default)
+        => GetModelsForMakeAsync(make, year: null, cancellationToken);
+
+    /// <summary>
+    /// Models for a make from NHTSA (cached). When <paramref name="year"/> is set,
+    /// prefers year-filtered results so models that did not exist that year are excluded.
+    /// Never throws — returns empty on failure.
+    /// </summary>
     public async Task<IReadOnlyList<string>> GetModelsForMakeAsync(
         string? make,
+        int? year,
         CancellationToken cancellationToken = default)
     {
         try
@@ -71,35 +85,27 @@ public sealed class VinLookupService(HttpClient http)
             if (string.IsNullOrWhiteSpace(make) || make.Length < 2)
                 return [];
 
-            if (ModelsByMakeCache.TryGetValue(make, out var cached))
+            var cacheKey = year is > 0 ? $"{make}|{year.Value}" : make;
+            if (ModelsByMakeCache.TryGetValue(cacheKey, out var cached))
                 return cached;
 
-            var url = $"api/vehicles/GetModelsForMake/{Uri.EscapeDataString(make)}?format=json";
-            using var response = await http.GetAsync(url, cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-                return [];
-
-            NhtsaModelsResponse? payload;
-            try
+            IReadOnlyList<string> models;
+            if (year is > 0)
             {
-                payload = await response.Content
-                    .ReadFromJsonAsync<NhtsaModelsResponse>(JsonOptions, cancellationToken)
+                models = await FetchModelsForMakeYearAsync(make, year.Value, cancellationToken)
                     .ConfigureAwait(false);
+
+                // NHTSA documents year filter for 1995+; for older years an empty
+                // response may mean "unsupported" rather than "no models".
+                if (models.Count == 0 && year.Value < NhtsaMakeYearMin)
+                    models = await FetchModelsForMakeAsync(make, cancellationToken).ConfigureAwait(false);
             }
-            catch
+            else
             {
-                return [];
+                models = await FetchModelsForMakeAsync(make, cancellationToken).ConfigureAwait(false);
             }
 
-            var models = (payload?.Results ?? [])
-                .Select(r => NullIfEmpty(r.Model_Name))
-                .Where(m => m is not null)
-                .Select(m => m!)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(m => m, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            ModelsByMakeCache[make] = models;
+            ModelsByMakeCache[cacheKey] = models;
             return models;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -110,6 +116,53 @@ public sealed class VinLookupService(HttpClient http)
         {
             return [];
         }
+    }
+
+    private async Task<IReadOnlyList<string>> FetchModelsForMakeAsync(
+        string make,
+        CancellationToken cancellationToken)
+    {
+        var url = $"api/vehicles/GetModelsForMake/{Uri.EscapeDataString(make)}?format=json";
+        return await FetchModelNamesAsync(url, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<IReadOnlyList<string>> FetchModelsForMakeYearAsync(
+        string make,
+        int year,
+        CancellationToken cancellationToken)
+    {
+        var url =
+            $"api/vehicles/GetModelsForMakeYear/make/{Uri.EscapeDataString(make)}/modelyear/{year}?format=json";
+        return await FetchModelNamesAsync(url, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<IReadOnlyList<string>> FetchModelNamesAsync(
+        string url,
+        CancellationToken cancellationToken)
+    {
+        using var response = await http.GetAsync(url, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+            return [];
+
+        NhtsaModelsResponse? payload;
+        try
+        {
+            payload = await response.Content
+                .ReadFromJsonAsync<NhtsaModelsResponse>(JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            return [];
+        }
+
+        return (payload?.Results ?? [])
+            .Select(r => NullIfEmpty(r.Model_Name))
+            .Where(m => m is not null)
+            .Select(m => m!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(m => m, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private async Task<VinDecodeResult?> TryDecodeFromNhtsaAsync(string vin, CancellationToken cancellationToken)

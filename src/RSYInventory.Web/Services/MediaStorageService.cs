@@ -33,7 +33,8 @@ public sealed class MediaStorageService(IWebHostEnvironment env)
         var absoluteDir = Path.Combine(env.WebRootPath, relativeDir);
         Directory.CreateDirectory(absoluteDir);
 
-        var fileName = $"photo{ext.ToLowerInvariant()}";
+        // Unique file name so multiple photos can live in the same folder.
+        var fileName = $"photo-{Guid.NewGuid():N}{ext.ToLowerInvariant()}";
         var absolutePath = Path.Combine(absoluteDir, fileName);
         await using (var fs = File.Create(absolutePath))
         {

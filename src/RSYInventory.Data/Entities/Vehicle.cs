@@ -35,7 +35,7 @@ public partial class Vehicle
 
     public int? PalletId { get; set; }
 
-    /// <summary>Relative path under wwwroot (e.g. uploads/vehicles/ford/12/photo.jpg).</summary>
+    /// <summary>Relative path under wwwroot (e.g. uploads/vehicles/ford/12/photo.jpg). Cover / first image.</summary>
     public string? ImageRelativePath { get; set; }
 
     public DateTime CreatedAtUtc { get; set; }
@@ -47,6 +47,8 @@ public partial class Vehicle
     public virtual User AcquiredByUser { get; set; } = null!;
 
     public virtual ICollection<InventoryMovement> InventoryMovements { get; set; } = new List<InventoryMovement>();
+
+    public virtual ICollection<VehicleImage> Images { get; set; } = new List<VehicleImage>();
 
     public virtual Pallet? Pallet { get; set; }
 

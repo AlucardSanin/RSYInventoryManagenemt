@@ -6,7 +6,7 @@
 
 <PageHeader Title="Vehículos adquiridos"
             Eyebrow="Vehículos"
-            Lead="Busca por VIN, marca, modelo, año o ubicación. Los datos se cargan al abrir esta pantalla.">
+            Lead="Busca por VIN, marca, modelo, año o ubicación. Toca la miniatura para ver las fotos.">
     <a class="btn btn-primary" href="vehicles/acquire">Registrar adquisición</a>
 </PageHeader>
 
@@ -81,11 +81,21 @@ else
                 <tbody>
                     @foreach (var v in Filtered)
                     {
+                        var images = VehicleService.GetImagePaths(v);
                         <tr>
-                            <td style="width:3.25rem">
-                                @if (!string.IsNullOrWhiteSpace(v.ImageRelativePath))
+                            <td style="width:3.75rem">
+                                @if (images.Count > 0)
                                 {
-                                    <img class="thumb-img" src="@v.ImageRelativePath" alt="" />
+                                    <button type="button"
+                                            class="thumb-btn"
+                                            title="@(images.Count == 1 ? "Ver foto" : $"Ver {images.Count} fotos")"
+                                            @onclick="@(() => OpenViewer(images))">
+                                        <img class="thumb-img" src="@images[0]" alt="" />
+                                        @if (images.Count > 1)
+                                        {
+                                            <span class="thumb-btn__badge">@images.Count</span>
+                                        }
+                                    </button>
                                 }
                             </td>
                             <td><code>@v.Vin</code></td>
@@ -120,11 +130,14 @@ else
     }
 }
 
+<ImageViewer @ref="_viewer" />
+
 @code {
     private List<Vehicle>? _items;
     private string? _error;
     private string _search = string.Empty;
     private string _locationFilter = string.Empty;
+    private ImageViewer? _viewer;
 
     private IEnumerable<Vehicle> Filtered
     {
@@ -165,6 +178,9 @@ else
             _error = ex.Message + " — ¿Ejecutaste los scripts SQL?";
         }
     }
+
+    private void OpenViewer(IReadOnlyList<string> images)
+        => _viewer?.Open(images);
 
     private static bool Contains(string? haystack, string needle)
         => !string.IsNullOrEmpty(haystack)

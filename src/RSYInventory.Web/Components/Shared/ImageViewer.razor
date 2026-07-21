@@ -1,0 +1,73 @@
+@* Lightweight lightbox for one or more image paths. *@
+
+@if (_open && _images.Count > 0)
+{
+    <div class="img-viewer" role="dialog" aria-modal="true" aria-label="Visor de imágenes" @onclick="Close">
+        <div class="img-viewer__stage" @onclick:stopPropagation>
+            <button type="button" class="img-viewer__close" @onclick="Close" aria-label="Cerrar">×</button>
+
+            @if (_images.Count > 1)
+            {
+                <button type="button" class="img-viewer__nav img-viewer__nav--prev" @onclick="Previous" aria-label="Anterior">‹</button>
+                <button type="button" class="img-viewer__nav img-viewer__nav--next" @onclick="Next" aria-label="Siguiente">›</button>
+            }
+
+            <img class="img-viewer__image" src="@Current" alt="" />
+
+            @if (_images.Count > 1)
+            {
+                <div class="img-viewer__counter">@(_index + 1) / @_images.Count</div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private bool _open;
+    private int _index;
+    private IReadOnlyList<string> _images = [];
+
+    private string Current => _images.Count == 0 ? string.Empty : _images[Math.Clamp(_index, 0, _images.Count - 1)];
+
+    public void Open(IEnumerable<string?> paths, int startIndex = 0)
+    {
+        _images = paths
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Select(p => p!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (_images.Count == 0)
+        {
+            _open = false;
+            return;
+        }
+
+        _index = Math.Clamp(startIndex, 0, _images.Count - 1);
+        _open = true;
+        StateHasChanged();
+    }
+
+    public void Open(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return;
+        Open([path]);
+    }
+
+    private void Close()
+    {
+        _open = false;
+    }
+
+    private void Previous()
+    {
+        if (_images.Count == 0) return;
+        _index = (_index - 1 + _images.Count) % _images.Count;
+    }
+
+    private void Next()
+    {
+        if (_images.Count == 0) return;
+        _index = (_index + 1) % _images.Count;
+    }
+}
