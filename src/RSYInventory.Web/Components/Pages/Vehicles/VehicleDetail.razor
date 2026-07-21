@@ -175,7 +175,7 @@ else if (_vehicle is not null && _editing)
                                      Options="_yearOptions"
                                      Placeholder="Escribe 201… o elige"
                                      AllowCustom="false"
-                                     MaxSuggestions="20" />
+                                     MaxSuggestions="@VehicleYearCatalog.DropdownVisibleCount" />
                 </div>
                 <div class="col-md-3">
                     <label class="form-label" for="make-combo">Marca</label>
