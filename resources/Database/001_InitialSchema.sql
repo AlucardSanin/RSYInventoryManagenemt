@@ -59,6 +59,7 @@ BEGIN
         UserName     NVARCHAR(100)  NOT NULL,
         DisplayName  NVARCHAR(200)  NOT NULL,
         Email        NVARCHAR(256)  NULL,
+        PasswordHash NVARCHAR(500)  NULL,
         IsActive     BIT            NOT NULL CONSTRAINT DF_Users_IsActive DEFAULT (1),
         CreatedAtUtc DATETIME2(7)   NOT NULL CONSTRAINT DF_Users_CreatedAtUtc DEFAULT (SYSUTCDATETIME()),
         CONSTRAINT UQ_Users_UserName UNIQUE (UserName)
@@ -148,6 +149,10 @@ BEGIN
         Year        INT            NULL,
         Description NVARCHAR(500)  NULL,
         Notes       NVARCHAR(2000) NULL,
+        SourceVin           NVARCHAR(17)   NULL, -- donor vehicle VIN (optional decode)
+        DisplacementLiters  DECIMAL(4, 2)  NULL, -- engines
+        TransmissionType    INT            NULL, -- transmissions: 1 Automatic, 2 Manual
+        DriveType           INT            NULL, -- transmissions: FWD/RWD/AWD/4x4/4x2
         PalletId    INT            NULL, -- NULL when sold / not placed
         CreatedAtUtc DATETIME2(7)  NOT NULL CONSTRAINT DF_InventoryItems_CreatedAtUtc DEFAULT (SYSUTCDATETIME()),
         UpdatedAtUtc DATETIME2(7)  NULL,
@@ -246,7 +251,8 @@ USING (VALUES
     (1, 1, N'Inventory Viewer',  N'View inventory and locations only.'),
     (2, 2, N'Inventory Editor',  N'Add, edit, remove inventory; assign vehicle locations.'),
     (3, 3, N'Zone Manager',      N'Create and edit zones, rows, and pallets for parts and vehicles.'),
-    (4, 4, N'Vehicle Acquirer',  N'Register newly acquired vehicles without assigning yard location.')
+    (4, 4, N'Vehicle Acquirer',  N'Register newly acquired vehicles without assigning yard location.'),
+    (5, 5, N'System Admin',      N'God user: create users and assign access levels / functions.')
 ) AS source (Id, Code, Name, Description)
 ON target.Id = source.Id
 WHEN NOT MATCHED THEN

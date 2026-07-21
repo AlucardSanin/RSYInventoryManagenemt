@@ -8,18 +8,24 @@ namespace RSYInventory.Data.Services;
 
 public class YardLayoutService
 {
-    private readonly YardInventoryDbContext _db;
+    private readonly IDbContextFactory<YardInventoryDbContext> _dbFactory;
     private readonly ICurrentUserService _currentUser;
+    private readonly AuditService _audit;
 
-    public YardLayoutService(YardInventoryDbContext db, ICurrentUserService currentUser)
+    public YardLayoutService(
+        IDbContextFactory<YardInventoryDbContext> dbFactory,
+        ICurrentUserService currentUser,
+        AuditService audit)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _currentUser = currentUser;
+        _audit = audit;
     }
 
     public async Task<List<Zone>> GetZonesAsync(ZonePurpose? purpose = null, CancellationToken ct = default)
     {
-        var query = _db.Zones
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var query = db.Zones
             .AsNoTracking()
             .Include(z => z.Rows)
                 .ThenInclude(r => r.Pallets)
@@ -39,8 +45,9 @@ public class YardLayoutService
 
     public async Task<List<Pallet>> GetPalletsAsync(ZonePurpose purpose, CancellationToken ct = default)
     {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var purposeValue = (int)purpose;
-        return await _db.Pallets
+        return await db.Pallets
             .AsNoTracking()
             .Include(p => p.Row)!.ThenInclude(r => r!.Zone)
             .Where(p => p.IsActive && p.Row.IsActive && p.Row.Zone.IsActive && p.Row.Zone.Purpose == purposeValue)
@@ -51,8 +58,13 @@ public class YardLayoutService
     }
 
     public static string FormatPalletLabel(Pallet pallet)
-        => $"{pallet.Row.Zone.Name} / Fila {pallet.Row.RowNumber} / Paleta {pallet.PalletNumber}"
-           + (string.IsNullOrWhiteSpace(pallet.Label) ? string.Empty : $" ({pallet.Label})");
+    {
+        var purpose = pallet.Row.Zone.Purpose == (int)ZonePurpose.Parts ? "Partes" : "Vehículos";
+        var core = $"{pallet.Row.Zone.Name} / Fila {pallet.Row.RowNumber} / Paleta {pallet.PalletNumber}";
+        if (!string.IsNullOrWhiteSpace(pallet.Label))
+            core += $" ({pallet.Label})";
+        return $"[{purpose}] {core}";
+    }
 
     public async Task<Zone> CreateZoneAsync(
         string name,
@@ -62,12 +74,13 @@ public class YardLayoutService
         CancellationToken ct = default)
     {
         EnsureCanManageZones();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
 
         if (rowCount < 1 || palletsPerRow < 1)
             throw new InvalidOperationException("La zona debe tener al menos 1 fila y 1 paleta por fila.");
 
         var purposeValue = (int)purpose;
-        if (await _db.Zones.AnyAsync(z => z.Name == name && z.Purpose == purposeValue, ct))
+        if (await db.Zones.AnyAsync(z => z.Name == name && z.Purpose == purposeValue, ct))
             throw new InvalidOperationException("Ya existe una zona con ese nombre y propósito.");
 
         var zone = new Zone
@@ -102,16 +115,26 @@ public class YardLayoutService
             zone.Rows.Add(row);
         }
 
-        _db.Zones.Add(zone);
-        await _db.SaveChangesAsync(ct);
+        db.Zones.Add(zone);
+        await db.SaveChangesAsync(ct);
+
+        await _audit.WriteAsync(
+            "ZoneCreated",
+            "Zone",
+            zone.Id,
+            $"Zona creada: {zone.Name} ({(purpose == ZonePurpose.Parts ? "Partes" : "Vehículos")})",
+            $"{rowCount} filas × {palletsPerRow} paletas",
+            ct);
+
         return zone;
     }
 
     public async Task ResizeZoneAsync(int zoneId, int newRowCount, int newPalletsPerRow, CancellationToken ct = default)
     {
         EnsureCanManageZones();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
 
-        var zone = await _db.Zones
+        var zone = await db.Zones
             .Include(z => z.Rows)
                 .ThenInclude(r => r.Pallets)
                     .ThenInclude(p => p.InventoryItems)
@@ -126,7 +149,6 @@ public class YardLayoutService
 
         var available = (int)InventoryItemStatus.Available;
 
-        // Shrink: only remove empty trailing rows/pallets
         var rowsOrdered = zone.Rows.OrderBy(r => r.RowNumber).ToList();
         if (newRowCount < rowsOrdered.Count)
         {
@@ -139,7 +161,7 @@ public class YardLayoutService
                     throw new InvalidOperationException(YardLayoutRules.DeletionBlockedMessage + $" (Fila {row.RowNumber})");
             }
 
-            _db.Rows.RemoveRange(toRemove);
+            db.Rows.RemoveRange(toRemove);
         }
 
         foreach (var row in zone.Rows.Where(r => r.RowNumber <= newRowCount).OrderBy(r => r.RowNumber))
@@ -156,7 +178,7 @@ public class YardLayoutService
                         throw new InvalidOperationException(YardLayoutRules.DeletionBlockedMessage + $" (Paleta {pallet.PalletNumber})");
                 }
 
-                _db.Pallets.RemoveRange(toRemove);
+                db.Pallets.RemoveRange(toRemove);
             }
 
             for (var p = palletsOrdered.Count + 1; p <= newPalletsPerRow; p++)
@@ -189,20 +211,29 @@ public class YardLayoutService
                 });
             }
 
-            _db.Rows.Add(row);
+            db.Rows.Add(row);
         }
 
         zone.RowAmount = newRowCount;
         zone.PalletsPerRow = newPalletsPerRow;
         zone.UpdatedAtUtc = DateTime.UtcNow;
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
+
+        await _audit.WriteAsync(
+            "ZoneResized",
+            "Zone",
+            zone.Id,
+            $"Zona redimensionada: {zone.Name}",
+            $"{newRowCount} filas × {newPalletsPerRow} paletas",
+            ct);
     }
 
     public async Task DeleteZoneAsync(int zoneId, CancellationToken ct = default)
     {
         EnsureCanManageZones();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
 
-        var zone = await _db.Zones
+        var zone = await db.Zones
             .Include(z => z.Rows)
                 .ThenInclude(r => r.Pallets)
                     .ThenInclude(p => p.InventoryItems)
@@ -220,14 +251,25 @@ public class YardLayoutService
         if (!YardLayoutRules.CanDeleteLocation(inv, veh))
             throw new InvalidOperationException(YardLayoutRules.DeletionBlockedMessage);
 
+        var zoneName = zone.Name;
+        var zonePurpose = zone.Purpose;
+
         foreach (var row in zone.Rows.ToList())
         {
-            _db.Pallets.RemoveRange(row.Pallets);
-            _db.Rows.Remove(row);
+            db.Pallets.RemoveRange(row.Pallets);
+            db.Rows.Remove(row);
         }
 
-        _db.Zones.Remove(zone);
-        await _db.SaveChangesAsync(ct);
+        db.Zones.Remove(zone);
+        await db.SaveChangesAsync(ct);
+
+        await _audit.WriteAsync(
+            "ZoneDeleted",
+            "Zone",
+            zoneId,
+            $"Zona eliminada: {zoneName}",
+            zonePurpose == (int)ZonePurpose.Parts ? "Partes" : "Vehículos",
+            ct);
     }
 
     private void EnsureCanManageZones()

@@ -24,6 +24,11 @@ Thumbs.db
 appsettings.*.local.json
 *.pfx
 
+## Uploaded media (keep folder structure)
+src/RSYInventory.Web/wwwroot/uploads/**
+!src/RSYInventory.Web/wwwroot/uploads/.gitkeep
+!src/RSYInventory.Web/wwwroot/uploads/**/.gitkeep
+
 ## MAUI / Android
 *.apk
 *.aab

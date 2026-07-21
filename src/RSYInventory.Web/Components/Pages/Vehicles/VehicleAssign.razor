@@ -1,15 +1,16 @@
 @page "/vehicles/{Id:int}/assign"
-@rendermode InteractiveServer
-@using RSYInventory.Data.Entities
-@using RSYInventory.Data.Enums
-@using RSYInventory.Data.Services
 @inject VehicleService Vehicles
 @inject YardLayoutService Layout
+@inject UiBusyService Busy
 @inject NavigationManager Nav
 
 <PageTitle>Asignar ubicación</PageTitle>
 
-<h1>Asignar ubicación a vehículo</h1>
+<PageHeader Title="Asignar ubicación"
+            Eyebrow="Vehículos"
+            Lead="Elige una paleta en una zona de vehículos.">
+    <a class="btn btn-outline-secondary" href="vehicles">Volver</a>
+</PageHeader>
 
 @if (!string.IsNullOrEmpty(_error))
 {
@@ -18,33 +19,48 @@
 
 @if (_vehicle is null && string.IsNullOrEmpty(_error))
 {
-    <p>Cargando…</p>
+    <div class="page-panel"><p class="mb-0 text-muted">Cargando vehículo…</p></div>
 }
 else if (_vehicle is not null)
 {
-    <p>
-        VIN <code>@_vehicle.Vin</code> — @_vehicle.Year @_vehicle.Make @_vehicle.Model
-        <br />
-        Ubicación actual:
-        @(_vehicle.Pallet is null ? "Sin ubicar" : YardLayoutService.FormatPalletLabel(_vehicle.Pallet))
-    </p>
-
-    <div class="mb-3">
-        <label class="form-label">Paleta (zonas de vehículos)</label>
-        <select class="form-select" @bind="_palletId">
-            <option value="0">— seleccionar —</option>
-            @foreach (var p in _pallets)
+    <div class="page-panel">
+        <p class="mb-1"><code>@_vehicle.Vin</code></p>
+        <p class="mb-2"><strong>@_vehicle.Year @_vehicle.Make @_vehicle.Model</strong></p>
+        <p class="meta-row mb-0">
+            Ubicación actual:
+            @if (_vehicle.Pallet is null)
             {
-                <option value="@p.Id">@YardLayoutService.FormatPalletLabel(p)</option>
+                <span class="badge-status badge-status--warn">Sin ubicar</span>
             }
-        </select>
+            else
+            {
+                <strong>@YardLayoutService.FormatPalletLabel(_vehicle.Pallet)</strong>
+            }
+        </p>
     </div>
-    <div class="mb-3">
-        <label class="form-label">Notas</label>
-        <input class="form-control" @bind="_notes" />
+
+    <div class="page-panel">
+        <div class="mb-3">
+            <label class="form-label" for="pallet-combo">Paleta (zonas de vehículos) *</label>
+            <SearchableCombo InputId="pallet-combo"
+                             Value="@PalletValue"
+                             ValueChanged="OnPalletChangedAsync"
+                             Options="_palletOptions"
+                             Placeholder="Escribe para filtrar zona, fila o paleta…"
+                             AllowCustom="false" />
+            <div class="form-text">Solo paletas de zonas de <strong>vehículos</strong> (no partes).</div>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Notas <span class="form-hint">(opcional)</span></label>
+            <input class="form-control" @bind="_notes" placeholder="Opcional" />
+        </div>
+        <div class="form-actions">
+            <button class="btn btn-primary" disabled="@_saving" @onclick="SaveAsync">
+                @(_saving ? "Guardando…" : "Guardar ubicación")
+            </button>
+            <a class="btn btn-link" href="vehicles">Cancelar</a>
+        </div>
     </div>
-    <button class="btn btn-primary" disabled="@_saving" @onclick="SaveAsync">Guardar ubicación</button>
-    <a class="btn btn-link" href="vehicles">Cancelar</a>
 }
 
 @code {
@@ -52,24 +68,37 @@ else if (_vehicle is not null)
 
     private Vehicle? _vehicle;
     private List<Pallet> _pallets = [];
+    private List<ComboOption> _palletOptions = [];
     private int _palletId;
     private string? _notes;
     private string? _error;
     private bool _saving;
 
+    private string? PalletValue => _palletId <= 0 ? null : _palletId.ToString();
+
     protected override async Task OnInitializedAsync()
     {
         try
         {
-            _vehicle = await Vehicles.GetByIdAsync(Id);
-            if (_vehicle is null)
+            await Busy.RunAsync(async () =>
             {
-                _error = "Vehículo no encontrado.";
-                return;
-            }
+                _vehicle = await Vehicles.GetByIdAsync(Id);
+                if (_vehicle is null)
+                {
+                    _error = "Vehículo no encontrado.";
+                    return;
+                }
 
-            _pallets = await Layout.GetPalletsAsync(ZonePurpose.Vehicles);
-            _palletId = _vehicle.PalletId ?? 0;
+                _pallets = await Layout.GetPalletsAsync(ZonePurpose.Vehicles);
+                _palletOptions = _pallets
+                    .Select(p =>
+                    {
+                        var label = YardLayoutService.FormatPalletLabel(p);
+                        return new ComboOption(p.Id.ToString(), label, label);
+                    })
+                    .ToList();
+                _palletId = _vehicle.PalletId ?? 0;
+            }, "Cargando vehículo…");
         }
         catch (Exception ex)
         {
@@ -77,17 +106,27 @@ else if (_vehicle is not null)
         }
     }
 
+    private Task OnPalletChangedAsync(string? value)
+    {
+        _palletId = int.TryParse(value, out var id) ? id : 0;
+        return Task.CompletedTask;
+    }
+
     private async Task SaveAsync()
     {
+        if (Busy.IsBusy || _saving) return;
         _error = null;
         _saving = true;
         try
         {
-            if (_palletId <= 0)
-                throw new InvalidOperationException("Seleccione una paleta.");
+            await Busy.RunAsync(async () =>
+            {
+                if (_palletId <= 0)
+                    throw new InvalidOperationException("Seleccione una paleta.");
 
-            await Vehicles.AssignLocationAsync(Id, _palletId, _notes);
-            Nav.NavigateTo("vehicles");
+                await Vehicles.AssignLocationAsync(Id, _palletId, _notes);
+                Nav.NavigateTo("vehicles");
+            }, "Guardando ubicación…");
         }
         catch (Exception ex)
         {

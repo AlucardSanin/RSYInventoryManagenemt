@@ -1,0 +1,146 @@
+@* Lightbox carousel for one or more vehicle photos. *@
+
+@if (_open && _images.Count > 0)
+{
+    <div class="img-viewer"
+         role="dialog"
+         aria-modal="true"
+         aria-label="Carrusel de fotos"
+         tabindex="0"
+         @ref="_root"
+         @onkeydown="OnKeyDown"
+         @onclick="Close">
+        <div class="img-viewer__panel" @onclick:stopPropagation="true">
+            <div class="img-viewer__toolbar">
+                <span class="img-viewer__counter">@(_index + 1) / @_images.Count</span>
+                <button type="button" class="img-viewer__close" @onclick="Close" aria-label="Cerrar">×</button>
+            </div>
+
+            <div class="img-viewer__stage">
+                @if (_images.Count > 1)
+                {
+                    <button type="button"
+                            class="img-viewer__nav img-viewer__nav--prev"
+                            @onclick="Previous"
+                            @onclick:stopPropagation="true"
+                            aria-label="Anterior">‹</button>
+                }
+
+                <img class="img-viewer__image" src="@Current" alt="Foto @(_index + 1)" />
+
+                @if (_images.Count > 1)
+                {
+                    <button type="button"
+                            class="img-viewer__nav img-viewer__nav--next"
+                            @onclick="Next"
+                            @onclick:stopPropagation="true"
+                            aria-label="Siguiente">›</button>
+                }
+            </div>
+
+            @if (_images.Count > 1)
+            {
+                <div class="img-viewer__thumbs" role="tablist" aria-label="Miniaturas">
+                    @for (var i = 0; i < _images.Count; i++)
+                    {
+                        var idx = i;
+                        <button type="button"
+                                class="img-viewer__thumb @(idx == _index ? "is-active" : null)"
+                                role="tab"
+                                aria-selected="@(idx == _index)"
+                                @onclick="@(() => GoTo(idx))"
+                                @onclick:stopPropagation="true">
+                            <img src="@_images[idx]" alt="" />
+                        </button>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private ElementReference _root;
+    private bool _open;
+    private int _index;
+    private IReadOnlyList<string> _images = [];
+
+    private string Current =>
+        _images.Count == 0
+            ? string.Empty
+            : _images[Math.Clamp(_index, 0, _images.Count - 1)];
+
+    public async Task OpenAsync(IEnumerable<string?> paths, int startIndex = 0)
+    {
+        _images = paths
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Select(p => p!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (_images.Count == 0)
+        {
+            _open = false;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        _index = Math.Clamp(startIndex, 0, _images.Count - 1);
+        _open = true;
+        await InvokeAsync(StateHasChanged);
+        await Task.Yield();
+        try
+        {
+            await _root.FocusAsync();
+        }
+        catch
+        {
+            // Focus is best-effort (keyboard arrows).
+        }
+    }
+
+    public void Open(IEnumerable<string?> paths, int startIndex = 0)
+        => _ = OpenAsync(paths, startIndex);
+
+    public void Open(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return;
+        Open([path]);
+    }
+
+    private void Close() => _open = false;
+
+    private void Previous()
+    {
+        if (_images.Count <= 1) return;
+        _index = (_index - 1 + _images.Count) % _images.Count;
+    }
+
+    private void Next()
+    {
+        if (_images.Count <= 1) return;
+        _index = (_index + 1) % _images.Count;
+    }
+
+    private void GoTo(int index)
+    {
+        if (index < 0 || index >= _images.Count) return;
+        _index = index;
+    }
+
+    private void OnKeyDown(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "Escape":
+                Close();
+                break;
+            case "ArrowLeft":
+                Previous();
+                break;
+            case "ArrowRight":
+                Next();
+                break;
+        }
+    }
+}

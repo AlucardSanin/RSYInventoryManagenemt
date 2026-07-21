@@ -21,7 +21,26 @@
 }
 
 .navbar-brand {
-    font-size: 1.1rem;
+    font-size: 1.15rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.brand-logo {
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+    border-radius: 0.35rem;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.nav-section {
+    margin: 1rem 1rem 0.35rem;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
 }
 
 .bi {
@@ -59,7 +78,8 @@
         padding-bottom: 1rem;
     }
 
-    .nav-item ::deep .nav-link {
+    .nav-item ::deep .nav-link,
+    .nav-item .nav-link {
         color: #d7d7d7;
         background: none;
         border: none;
@@ -69,6 +89,9 @@
         align-items: center;
         line-height: 3rem;
         width: 100%;
+        text-align: left;
+        padding: 0 1rem 0 0;
+        cursor: pointer;
     }
 
 .nav-item ::deep a.active {

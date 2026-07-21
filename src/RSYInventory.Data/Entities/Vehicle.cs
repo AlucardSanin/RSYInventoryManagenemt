@@ -19,7 +19,11 @@ public partial class Vehicle
 
     public int? DriveType { get; set; }
 
+    /// <summary>Odometer reading in miles (not kilometers).</summary>
     public int? Mileage { get; set; }
+
+    /// <summary>Optional acquisition purchase price.</summary>
+    public decimal? PurchasePrice { get; set; }
 
     public string? Observations { get; set; }
 
@@ -31,13 +35,20 @@ public partial class Vehicle
 
     public int? PalletId { get; set; }
 
+    /// <summary>Relative path under wwwroot (e.g. uploads/vehicles/ford/12/photo.jpg). Cover / first image.</summary>
+    public string? ImageRelativePath { get; set; }
+
     public DateTime CreatedAtUtc { get; set; }
 
     public DateTime? UpdatedAtUtc { get; set; }
 
+    public DateTime? DeletedAtUtc { get; set; }
+
     public virtual User AcquiredByUser { get; set; } = null!;
 
     public virtual ICollection<InventoryMovement> InventoryMovements { get; set; } = new List<InventoryMovement>();
+
+    public virtual ICollection<VehicleImage> Images { get; set; } = new List<VehicleImage>();
 
     public virtual Pallet? Pallet { get; set; }
 

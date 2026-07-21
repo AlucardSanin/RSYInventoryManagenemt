@@ -13,9 +13,15 @@ public partial class User
 
     public string? Email { get; set; }
 
+    public string? PasswordHash { get; set; }
+
     public bool IsActive { get; set; }
 
     public DateTime CreatedAtUtc { get; set; }
+
+    public virtual ICollection<AuditEvent> AuditEvents { get; set; } = new List<AuditEvent>();
+
+    public virtual ICollection<InventoryItem> CreatedInventoryItems { get; set; } = new List<InventoryItem>();
 
     public virtual ICollection<InventoryMovement> InventoryMovements { get; set; } = new List<InventoryMovement>();
 

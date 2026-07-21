@@ -1,14 +1,13 @@
 @page "/zones"
-@rendermode InteractiveServer
-@using RSYInventory.Data.Entities
-@using RSYInventory.Data.Enums
-@using RSYInventory.Data.Services
 @inject YardLayoutService Layout
+@inject UiBusyService Busy
+@inject IJSRuntime Js
 
 <PageTitle>Zonas</PageTitle>
 
-<h1>Zonas de la yarda</h1>
-<p class="text-muted">El Zone Manager puede crear zonas y ajustar filas/paletas. No se puede eliminar una ubicación con inventario.</p>
+<PageHeader Title="Zonas de la yarda"
+            Eyebrow="Configuración"
+            Lead="Crea zonas de partes o vehículos y ajusta filas/paletas. No se puede eliminar una ubicación que aún tenga inventario." />
 
 @if (!string.IsNullOrEmpty(_error))
 {
@@ -19,66 +18,92 @@
     <div class="alert alert-success">@_ok</div>
 }
 
-<section class="mb-4">
-    <h2 class="h5">Crear zona</h2>
-    <div class="row g-2 align-items-end">
-        <div class="col-md-3">
-            <label class="form-label">Nombre</label>
-            <input class="form-control" @bind="_newName" />
+<div class="page-panel">
+    <h2 class="page-panel__title">Crear zona</h2>
+    <div class="row g-3">
+        <div class="col-md-6">
+            <label class="form-label" for="zone-name">Nombre *</label>
+            <input id="zone-name" class="form-control" @bind="_newName" placeholder="Ej. Zona C" />
         </div>
-        <div class="col-md-3">
-            <label class="form-label">Propósito</label>
-            <select class="form-select" @bind="_newPurpose">
-                <option value="@ZonePurpose.Parts">Partes (motores/transmisiones)</option>
-                <option value="@ZonePurpose.Vehicles">Vehículos</option>
-            </select>
+        <div class="col-md-6">
+            <label class="form-label d-block mb-2">Propósito *</label>
+            <div class="choice-cards choice-cards--compact">
+                <button type="button"
+                        class="choice-card text-start @(_newPurpose == ZonePurpose.Parts ? "is-selected" : null)"
+                        @onclick="@(() => _newPurpose = ZonePurpose.Parts)">
+                    <strong>Partes</strong>
+                    <span>Motores y transmisiones</span>
+                </button>
+                <button type="button"
+                        class="choice-card text-start @(_newPurpose == ZonePurpose.Vehicles ? "is-selected" : null)"
+                        @onclick="@(() => _newPurpose = ZonePurpose.Vehicles)">
+                    <strong>Vehículos</strong>
+                    <span>Autos en la yarda</span>
+                </button>
+            </div>
         </div>
-        <div class="col-md-2">
-            <label class="form-label">Filas</label>
-            <input type="number" class="form-control" min="1" @bind="_newRows" />
+        <div class="col-6 col-md-3">
+            <label class="form-label" for="zone-rows">Filas *</label>
+            <input id="zone-rows" type="number" class="form-control" min="1" @bind="_newRows" />
         </div>
-        <div class="col-md-2">
-            <label class="form-label">Paletas/fila</label>
-            <input type="number" class="form-control" min="1" @bind="_newPallets" />
+        <div class="col-6 col-md-3">
+            <label class="form-label" for="zone-pallets">Paletas/fila *</label>
+            <input id="zone-pallets" type="number" class="form-control" min="1" @bind="_newPallets" />
         </div>
-        <div class="col-md-2">
-            <button class="btn btn-primary w-100" @onclick="CreateAsync">Crear</button>
+        <div class="col-md-6 d-flex align-items-end">
+            <button class="btn btn-primary w-100" @onclick="CreateAsync" disabled="@Busy.IsBusy">Crear zona</button>
         </div>
     </div>
-</section>
+</div>
 
 @if (_zones is null)
 {
-    <p>Cargando…</p>
+    <div class="page-panel"><p class="mb-0 text-muted">Cargando zonas…</p></div>
+}
+else if (_zones.Count == 0)
+{
+    <div class="page-panel empty-state">
+        <p class="empty-state__title">No hay zonas activas</p>
+        <p class="mb-0">Crea la primera zona con el formulario de arriba.</p>
+    </div>
 }
 else
 {
-    @foreach (var zone in _zones)
-    {
-        <div class="border-bottom py-3">
-            <h2 class="h5 mb-1">@zone.Name</h2>
-            <p class="mb-2">
-                @(zone.Purpose == (int)ZonePurpose.Parts ? "Partes" : "Vehículos")
-                · @zone.RowAmount filas × @zone.PalletsPerRow paletas
-            </p>
-            <div class="row g-2 align-items-end">
-                <div class="col-auto">
-                    <label class="form-label">Filas</label>
-                    <input type="number" class="form-control" min="1" @bind="_resizeRows[zone.Id]" />
+    <div class="page-panel">
+        <h2 class="page-panel__title">Zonas existentes</h2>
+        @foreach (var zone in _zones)
+        {
+            <div class="zone-item">
+                <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+                    <h3 class="h5 mb-0">@zone.Name</h3>
+                    @if (zone.Purpose == (int)ZonePurpose.Parts)
+                    {
+                        <span class="badge-status badge-status--parts">Partes</span>
+                    }
+                    else
+                    {
+                        <span class="badge-status badge-status--vehicles">Vehículos</span>
+                    }
+                    <span class="form-hint">@zone.RowAmount filas × @zone.PalletsPerRow paletas</span>
                 </div>
-                <div class="col-auto">
-                    <label class="form-label">Paletas/fila</label>
-                    <input type="number" class="form-control" min="1" @bind="_resizePallets[zone.Id]" />
-                </div>
-                <div class="col-auto">
-                    <button class="btn btn-outline-primary" @onclick="() => ResizeAsync(zone.Id)">Actualizar tamaño</button>
-                </div>
-                <div class="col-auto">
-                    <button class="btn btn-outline-danger" @onclick="() => DeleteAsync(zone.Id)">Eliminar</button>
+
+                <div class="row g-2 align-items-end">
+                    <div class="col-6 col-sm-auto">
+                        <label class="form-label">Filas</label>
+                        <input type="number" class="form-control" min="1" @bind="_resizeRows[zone.Id]" />
+                    </div>
+                    <div class="col-6 col-sm-auto">
+                        <label class="form-label">Paletas/fila</label>
+                        <input type="number" class="form-control" min="1" @bind="_resizePallets[zone.Id]" />
+                    </div>
+                    <div class="col-12 col-sm-auto form-actions mt-0">
+                        <button class="btn btn-outline-primary" @onclick="() => ResizeAsync(zone.Id)" disabled="@Busy.IsBusy">Actualizar tamaño</button>
+                        <button class="btn btn-outline-danger" @onclick="() => DeleteAsync(zone)" disabled="@Busy.IsBusy">Eliminar</button>
+                    </div>
                 </div>
             </div>
-        </div>
-    }
+        }
+    </div>
 }
 
 @code {
@@ -99,12 +124,15 @@ else
         _error = null;
         try
         {
-            _zones = await Layout.GetZonesAsync();
-            foreach (var z in _zones)
+            await Busy.RunAsync(async () =>
             {
-                _resizeRows[z.Id] = z.RowAmount;
-                _resizePallets[z.Id] = z.PalletsPerRow;
-            }
+                _zones = await Layout.GetZonesAsync();
+                foreach (var z in _zones)
+                {
+                    _resizeRows[z.Id] = z.RowAmount;
+                    _resizePallets[z.Id] = z.PalletsPerRow;
+                }
+            }, "Cargando zonas…");
         }
         catch (Exception ex)
         {
@@ -114,14 +142,23 @@ else
 
     private async Task CreateAsync()
     {
+        if (Busy.IsBusy) return;
         _error = null;
         _ok = null;
         try
         {
-            await Layout.CreateZoneAsync(_newName, _newPurpose, _newRows, _newPallets);
-            _ok = "Zona creada.";
-            _newName = string.Empty;
-            await ReloadAsync();
+            await Busy.RunAsync(async () =>
+            {
+                await Layout.CreateZoneAsync(_newName, _newPurpose, _newRows, _newPallets);
+                _ok = "Zona creada.";
+                _newName = string.Empty;
+                _zones = await Layout.GetZonesAsync();
+                foreach (var z in _zones)
+                {
+                    _resizeRows[z.Id] = z.RowAmount;
+                    _resizePallets[z.Id] = z.PalletsPerRow;
+                }
+            }, "Creando zona…");
         }
         catch (Exception ex)
         {
@@ -131,13 +168,22 @@ else
 
     private async Task ResizeAsync(int zoneId)
     {
+        if (Busy.IsBusy) return;
         _error = null;
         _ok = null;
         try
         {
-            await Layout.ResizeZoneAsync(zoneId, _resizeRows[zoneId], _resizePallets[zoneId]);
-            _ok = "Zona actualizada.";
-            await ReloadAsync();
+            await Busy.RunAsync(async () =>
+            {
+                await Layout.ResizeZoneAsync(zoneId, _resizeRows[zoneId], _resizePallets[zoneId]);
+                _ok = "Zona actualizada.";
+                _zones = await Layout.GetZonesAsync();
+                foreach (var z in _zones)
+                {
+                    _resizeRows[z.Id] = z.RowAmount;
+                    _resizePallets[z.Id] = z.PalletsPerRow;
+                }
+            }, "Actualizando zona…");
         }
         catch (Exception ex)
         {
@@ -145,15 +191,39 @@ else
         }
     }
 
-    private async Task DeleteAsync(int zoneId)
+    private async Task DeleteAsync(Zone zone)
     {
+        if (Busy.IsBusy) return;
+
+        try
+        {
+            var confirmed = await Js.InvokeAsync<bool>(
+                "confirm",
+                $"¿Eliminar la zona \"{zone.Name}\"? Solo funciona si no tiene inventario.");
+            if (!confirmed) return;
+        }
+        catch
+        {
+            // If JS confirm fails, abort rather than deleting by accident.
+            _error = "No se pudo confirmar la eliminación.";
+            return;
+        }
+
         _error = null;
         _ok = null;
         try
         {
-            await Layout.DeleteZoneAsync(zoneId);
-            _ok = "Zona eliminada.";
-            await ReloadAsync();
+            await Busy.RunAsync(async () =>
+            {
+                await Layout.DeleteZoneAsync(zone.Id);
+                _ok = "Zona eliminada.";
+                _zones = await Layout.GetZonesAsync();
+                foreach (var z in _zones)
+                {
+                    _resizeRows[z.Id] = z.RowAmount;
+                    _resizePallets[z.Id] = z.PalletsPerRow;
+                }
+            }, "Eliminando zona…");
         }
         catch (Exception ex)
         {
