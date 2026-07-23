@@ -26,6 +26,7 @@ var connectionString = builder.Configuration.GetConnectionString("YardInventory"
 builder.Services.AddYardInventoryData(connectionString);
 builder.Services.AddScoped<IUserSessionStore, ProtectedUserSessionStore>();
 builder.Services.AddScoped<UiBusyService>();
+builder.Services.AddScoped<ToastService>();
 builder.Services.AddSingleton<MediaStorageService>();
 
 builder.Services.Configure<CompanyInvoiceOptions>(

@@ -203,6 +203,8 @@ public class VehicleService
             .FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
             ?? throw new InvalidOperationException("Vehículo no encontrado.");
 
+        EnsureLegacyCoverInGallery(vehicle, db);
+
         if (vehicle.Images.Any(i => string.Equals(i.RelativePath, relativePath, StringComparison.OrdinalIgnoreCase)))
             return;
 
@@ -222,6 +224,47 @@ public class VehicleService
         await db.SaveChangesAsync(ct);
     }
 
+    /// <summary>Removes one gallery photo. Cover falls back to the next remaining image.</summary>
+    public async Task RemoveImageAsync(int vehicleId, int imageId, CancellationToken ct = default)
+    {
+        if (!_currentUser.CanAcquireVehicles && !_currentUser.CanManageUsers)
+            throw new UnauthorizedAccessException("No tiene permiso para editar vehículos.");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var vehicle = await db.Vehicles
+            .Include(v => v.Images)
+            .FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+            ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+        EnsureLegacyCoverInGallery(vehicle, db);
+        await db.SaveChangesAsync(ct);
+
+        var image = vehicle.Images.FirstOrDefault(i => i.Id == imageId)
+            ?? throw new InvalidOperationException("Imagen no encontrada.");
+
+        var removedPath = image.RelativePath;
+        db.VehicleImages.Remove(image);
+        await db.SaveChangesAsync(ct);
+
+        // Reload remaining after delete.
+        var remaining = await db.VehicleImages
+            .Where(i => i.VehicleId == vehicleId)
+            .OrderBy(i => i.SortOrder)
+            .ThenBy(i => i.Id)
+            .ToListAsync(ct);
+
+        vehicle = await db.Vehicles.FirstAsync(v => v.Id == vehicleId, ct);
+        if (string.Equals(vehicle.ImageRelativePath, removedPath, StringComparison.OrdinalIgnoreCase)
+            || remaining.Count == 0
+            || !remaining.Any(i => string.Equals(i.RelativePath, vehicle.ImageRelativePath, StringComparison.OrdinalIgnoreCase)))
+        {
+            vehicle.ImageRelativePath = remaining.FirstOrDefault()?.RelativePath;
+        }
+
+        vehicle.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
     /// <summary>Ordered gallery paths (falls back to legacy ImageRelativePath when gallery is empty).</summary>
     public static IReadOnlyList<string> GetImagePaths(Vehicle vehicle)
     {
@@ -233,12 +276,53 @@ public class VehicleService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        if (fromGallery.Count > 0)
-            return fromGallery;
+        if (!string.IsNullOrWhiteSpace(vehicle.ImageRelativePath)
+            && !fromGallery.Any(p => string.Equals(p, vehicle.ImageRelativePath, StringComparison.OrdinalIgnoreCase)))
+        {
+            fromGallery.Insert(0, vehicle.ImageRelativePath!);
+        }
 
-        return string.IsNullOrWhiteSpace(vehicle.ImageRelativePath)
-            ? []
-            : [vehicle.ImageRelativePath];
+        return fromGallery;
+    }
+
+    /// <summary>Gallery rows for edit UI (ensures legacy cover appears as a removable item).</summary>
+    public async Task<IReadOnlyList<VehicleImage>> GetImagesForEditAsync(int vehicleId, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var vehicle = await db.Vehicles
+            .Include(v => v.Images)
+            .FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+            ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+        EnsureLegacyCoverInGallery(vehicle, db);
+        if (db.ChangeTracker.HasChanges())
+            await db.SaveChangesAsync(ct);
+
+        return vehicle.Images
+            .OrderBy(i => i.SortOrder)
+            .ThenBy(i => i.Id)
+            .ToList();
+    }
+
+    private static void EnsureLegacyCoverInGallery(Vehicle vehicle, YardInventoryDbContext db)
+    {
+        if (string.IsNullOrWhiteSpace(vehicle.ImageRelativePath))
+            return;
+
+        if (vehicle.Images.Any(i =>
+                string.Equals(i.RelativePath, vehicle.ImageRelativePath, StringComparison.OrdinalIgnoreCase)))
+            return;
+
+        var minOrder = vehicle.Images.Count == 0 ? 0 : vehicle.Images.Min(i => i.SortOrder) - 1;
+        var row = new VehicleImage
+        {
+            VehicleId = vehicle.Id,
+            RelativePath = vehicle.ImageRelativePath!,
+            SortOrder = minOrder,
+            CreatedAtUtc = DateTime.UtcNow
+        };
+        db.VehicleImages.Add(row);
+        vehicle.Images.Add(row);
     }
 
     public async Task UpdateAsync(
@@ -314,39 +398,45 @@ public class VehicleService
         if (!_currentUser.CanAcquireVehicles && !_currentUser.CanManageUsers && !_currentUser.CanEditInventory)
             throw new UnauthorizedAccessException("No tiene permiso para generar facturas.");
 
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await using var strategyDb = await _dbFactory.CreateDbContextAsync(ct);
+        var strategy = strategyDb.Database.CreateExecutionStrategy();
 
-        var vehicle = await db.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
-            ?? throw new InvalidOperationException("Vehículo no encontrado.");
-
-        if (vehicle.InvoiceNumber is > 0)
+        return await strategy.ExecuteAsync(async () =>
         {
+            await using var db = await _dbFactory.CreateDbContextAsync(ct);
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+
+            var vehicle = await db.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+                ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+            if (vehicle.InvoiceNumber is > 0)
+            {
+                await tx.CommitAsync(ct);
+                return vehicle.InvoiceNumber.Value;
+            }
+
+            // Atomically take the next number from the sequence table.
+            // EF Core maps scalar SqlQuery results to a column named Value.
+            var assigned = await db.Database.SqlQueryRaw<int>(
+                    """
+                    UPDATE dbo.InvoiceSequence WITH (UPDLOCK, ROWLOCK)
+                    SET NextNumber = NextNumber + 1
+                    OUTPUT deleted.NextNumber AS [Value]
+                    WHERE Id = 1;
+                    """)
+                .ToListAsync(ct);
+
+            var number = assigned.FirstOrDefault();
+            if (number <= 0)
+                throw new InvalidOperationException("No se pudo asignar el número de factura. Ejecuta 011_VehicleInvoiceAndPayment.sql.");
+
+            vehicle.InvoiceNumber = number;
+            vehicle.InvoiceIssuedAtUtc = DateTime.UtcNow;
+            vehicle.UpdatedAtUtc = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
-            return vehicle.InvoiceNumber.Value;
-        }
-
-        // Atomically take the next number from the sequence table.
-        // EF Core maps scalar SqlQuery results to a column named Value.
-        var assigned = await db.Database.SqlQueryRaw<int>(
-                """
-                UPDATE dbo.InvoiceSequence WITH (UPDLOCK, ROWLOCK)
-                SET NextNumber = NextNumber + 1
-                OUTPUT deleted.NextNumber AS [Value]
-                WHERE Id = 1;
-                """)
-            .ToListAsync(ct);
-
-        var number = assigned.FirstOrDefault();
-        if (number <= 0)
-            throw new InvalidOperationException("No se pudo asignar el número de factura. Ejecuta 011_VehicleInvoiceAndPayment.sql.");
-
-        vehicle.InvoiceNumber = number;
-        vehicle.InvoiceIssuedAtUtc = DateTime.UtcNow;
-        vehicle.UpdatedAtUtc = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
-        await tx.CommitAsync(ct);
-        return number;
+            return number;
+        });
     }
 
     private static string? NullIfWhiteSpace(string? value)

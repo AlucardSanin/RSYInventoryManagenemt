@@ -181,12 +181,13 @@ public sealed class PurchaseInvoicePdfService
                         });
                 });
 
-                page.Footer().Height(140).PaddingHorizontal(-56).Element(footer =>
+                // Full-bleed footer: FitWidth spans the page; FitArea left a white gap on the right.
+                page.Footer().Height(168).PaddingHorizontal(-56).Element(footer =>
                 {
                     if (File.Exists(footerPath))
-                        footer.Image(footerPath).FitArea();
+                        footer.Width(PageSizes.Letter.Width).Image(footerPath).FitWidth();
                     else
-                        footer.Height(140).Background("#1F424C");
+                        footer.Height(168).Background("#1F424C");
                 });
             });
         });

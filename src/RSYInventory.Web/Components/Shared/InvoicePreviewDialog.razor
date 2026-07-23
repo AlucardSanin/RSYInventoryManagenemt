@@ -1,5 +1,6 @@
 @inject VehicleInvoiceService Invoices
 @inject UiBusyService Busy
+@inject ToastService Toasts
 @using RSYInventory.Web.Services.Invoice
 
 @if (_open && _result is not null)
@@ -124,6 +125,7 @@
         {
             _error = ex.Message;
             _result = null;
+            Toasts.Error(ex.Message);
         }
 
         await InvokeAsync(StateHasChanged);
@@ -138,10 +140,12 @@
         {
             await Invoices.SendEmailAsync(_result);
             _info = $"Factura enviada a {_result.Vehicle.SellerEmail}.";
+            Toasts.Success(_info);
         }
         catch (Exception ex)
         {
             _error = ex.Message;
+            Toasts.Error(ex.Message);
         }
         finally
         {

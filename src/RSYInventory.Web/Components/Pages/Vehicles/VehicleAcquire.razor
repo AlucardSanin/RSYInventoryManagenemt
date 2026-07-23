@@ -4,6 +4,7 @@
 @inject VinLookupService VinLookup
 @inject MediaStorageService Media
 @inject UiBusyService Busy
+@inject ToastService Toasts
 @inject NavigationManager Nav
 @using Microsoft.AspNetCore.Components.Forms
 
@@ -581,7 +582,13 @@
                     }
 
                     if (failed > 0)
-                        _info = $"Vehículo guardado, pero {failed} foto(s) no se pudieron subir.";
+                        Toasts.Info($"Vehículo guardado, pero {failed} foto(s) no se pudieron subir.");
+                    else
+                        Toasts.Success("Vehículo registrado.");
+                }
+                else
+                {
+                    Toasts.Success("Vehículo registrado.");
                 }
 
                 _pendingInvoiceVehicleId = created.Id;
@@ -589,11 +596,12 @@
 
             if (_pendingInvoiceVehicleId is int vehicleId && _invoiceDialog is not null)
                 await _invoiceDialog.OpenAsync(vehicleId);
-            else if (_pendingInvoiceVehicleId is int id)
-                Nav.NavigateTo($"vehicles/{id}");
+            else
+                Nav.NavigateTo("vehicles");
         }
         catch (Exception ex)
         {
+            Toasts.Error(ex.Message);
             _error = ex.Message;
         }
         finally
@@ -604,10 +612,7 @@
 
     private void OnInvoiceClosed()
     {
-        if (_pendingInvoiceVehicleId is int id)
-            Nav.NavigateTo($"vehicles/{id}");
-        else
-            Nav.NavigateTo("vehicles");
+        Nav.NavigateTo("vehicles");
     }
 
     private sealed class AcquireModel

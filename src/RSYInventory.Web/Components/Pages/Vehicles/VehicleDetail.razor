@@ -5,6 +5,7 @@
 @inject MediaStorageService Media
 @inject ICurrentUserService CurrentUser
 @inject UiBusyService Busy
+@inject ToastService Toasts
 @inject NavigationManager Nav
 @using Microsoft.AspNetCore.Components.Forms
 
@@ -291,14 +292,36 @@ else if (_vehicle is not null && _editing)
                     <label class="form-label">Método de pago</label>
                     <InputText class="form-control" @bind-Value="_edit.PaymentMethod" placeholder="Cash, Zelle, Check…" />
                 </div>
-                <div class="col-md-6">
-                    <label class="form-label">Agregar fotos</label>
-                    <InputFile class="form-control" OnChange="OnImagesSelected" accept=".jpg,.jpeg,.png,.webp,image/*" multiple />
-                    <div class="image-upload-hint">Se agregan a la galería existente (máx. 12 por vez).</div>
-                    @if (_pendingFiles.Count > 0)
+                <div class="col-12">
+                    <label class="form-label">Fotos</label>
+                    @if (_editImages.Count > 0 || _pendingFiles.Count > 0)
                     {
-                        <div class="form-hint mt-1">@_pendingFiles.Count nueva(s)</div>
+                        <div class="edit-gallery">
+                            @foreach (var img in _editImages)
+                            {
+                                <div class="edit-gallery__item">
+                                    <img src="@MediaPaths.ToUrl(img.RelativePath)" alt="Foto" />
+                                    <button type="button"
+                                            class="edit-gallery__remove"
+                                            title="Eliminar foto"
+                                            disabled="@(_saving || Busy.IsBusy)"
+                                            @onclick="@(() => RemoveExistingImageAsync(img.Id))">×</button>
+                                </div>
+                            }
+                            @foreach (var pending in _pendingFiles)
+                            {
+                                <div class="edit-gallery__item edit-gallery__pending" title="@pending.Name">
+                                    Nueva
+                                </div>
+                            }
+                        </div>
                     }
+                    else
+                    {
+                        <div class="form-hint">Sin fotos todavía.</div>
+                    }
+                    <InputFile class="form-control mt-2" OnChange="OnImagesSelected" accept=".jpg,.jpeg,.png,.webp,image/*" multiple />
+                    <div class="image-upload-hint">Las nuevas se agregan a las existentes (máx. 12 por vez). Usa × para quitar una actual.</div>
                 </div>
                 <div class="col-12">
                     <label class="form-label">Observaciones</label>
@@ -347,6 +370,7 @@ else if (_vehicle is not null && _editing)
     private List<ComboOption> _modelOptions = [];
     private List<string> _images = [];
     private readonly List<IBrowserFile> _pendingFiles = [];
+    private List<VehicleImage> _editImages = [];
     private CancellationTokenSource? _modelLoadCts;
     private ImageViewer? _viewer;
     private InvoicePreviewDialog? _invoiceDialog;
@@ -415,6 +439,7 @@ else if (_vehicle is not null && _editing)
         _info = null;
         _vinHint = null;
         _pendingFiles.Clear();
+        _editImages = [];
 
         _edit = new EditModel
         {
@@ -441,6 +466,8 @@ else if (_vehicle is not null && _editing)
         {
             await Busy.RunAsync(async () =>
             {
+                _editImages = (await Vehicles.GetImagesForEditAsync(Id)).ToList();
+
                 var sources = await Vehicles.GetSourcesAsync();
                 _sourceOptions = sources.Select(s => new ComboOption(s.Id.ToString(), s.Name)).ToList();
                 // Keep current source visible even if inactive.
@@ -470,14 +497,40 @@ else if (_vehicle is not null && _editing)
     {
         _editing = false;
         _pendingFiles.Clear();
+        _editImages = [];
         _error = null;
         _vinHint = null;
     }
 
     private void OnImagesSelected(InputFileChangeEventArgs e)
     {
-        _pendingFiles.Clear();
-        _pendingFiles.AddRange(e.GetMultipleFiles(12));
+        // Append to pending new files (does not remove existing gallery photos).
+        var selected = e.GetMultipleFiles(12);
+        var room = Math.Max(0, 12 - _pendingFiles.Count);
+        if (room > 0)
+            _pendingFiles.AddRange(selected.Take(room));
+    }
+
+    private async Task RemoveExistingImageAsync(int imageId)
+    {
+        if (_saving || Busy.IsBusy || !CanEdit) return;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                await Vehicles.RemoveImageAsync(Id, imageId);
+                _editImages = (await Vehicles.GetImagesForEditAsync(Id)).ToList();
+                _vehicle = await Vehicles.GetByIdAsync(Id);
+                if (_vehicle is not null)
+                    _images = MediaPaths.ToUrls(VehicleService.GetImagePaths(_vehicle)).ToList();
+            }, "Eliminando foto…");
+            Toasts.Success("Foto eliminada.");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+            _error = ex.Message;
+        }
     }
 
     private async Task OnYearChangedAsync(string? value)
@@ -675,13 +728,21 @@ else if (_vehicle is not null && _editing)
 
                 _pendingFiles.Clear();
                 await LoadAsync();
-                _info = failed > 0
-                    ? $"Cambios guardados, pero {failed} foto(s) no se subieron."
-                    : "Cambios guardados.";
+                if (failed > 0)
+                {
+                    Toasts.Info($"Cambios guardados, pero {failed} foto(s) no se subieron.");
+                    _info = $"Cambios guardados, pero {failed} foto(s) no se subieron.";
+                }
+                else
+                {
+                    Toasts.Success("Cambios guardados.");
+                    _info = "Cambios guardados.";
+                }
             }, "Guardando cambios…");
         }
         catch (Exception ex)
         {
+            Toasts.Error(ex.Message);
             _error = ex.Message;
             _editing = true;
         }
@@ -733,7 +794,15 @@ else if (_vehicle is not null && _editing)
     {
         if (_vehicle is null || _invoiceDialog is null) return;
         _error = null;
-        await _invoiceDialog.OpenAsync(_vehicle.Id);
+        try
+        {
+            await _invoiceDialog.OpenAsync(_vehicle.Id);
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+            _error = ex.Message;
+        }
     }
 
     private async Task OnInvoiceClosedAsync()
