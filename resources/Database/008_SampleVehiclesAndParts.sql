@@ -10,7 +10,7 @@
  Requisitos previos:
    - Schema completo (001 … 007)
    - Al menos 1 usuario activo
-   - Fuentes de vehículo (Wheelzy / Pebble / …)
+   - Fuentes de vehículo (Wheelzy / Peddle / …)
    - Zona de partes con paletas (p. ej. 002_DemoUserAndPartsZone)
    - Zonas de vehículos con paletas (Zona A / B del 001) — opcionales; si no hay,
      los vehículos quedan sin ubicar
@@ -43,7 +43,8 @@ END;
 DECLARE @SourceWheelzy INT = COALESCE(
     (SELECT TOP 1 Id FROM dbo.VehicleSources WHERE Name = N'Wheelzy' AND IsActive = 1),
     (SELECT TOP 1 Id FROM dbo.VehicleSources WHERE IsActive = 1 ORDER BY Id));
-DECLARE @SourcePebble INT = COALESCE(
+DECLARE @SourcePeddle INT = COALESCE(
+    (SELECT TOP 1 Id FROM dbo.VehicleSources WHERE Name = N'Peddle' AND IsActive = 1),
     (SELECT TOP 1 Id FROM dbo.VehicleSources WHERE Name = N'Pebble' AND IsActive = 1),
     @SourceWheelzy);
 DECLARE @SourceFb INT = COALESCE(
@@ -109,15 +110,15 @@ PRINT N'Usuario seed Id=' + CAST(@UserId AS NVARCHAR(20))
     SELECT *
     FROM (VALUES
         (N'TESTVEH0000000001', 2018, N'Toyota',     N'Camry',     1, 1,  82000,  1850.00, N'Seed · sin daño mayor',           @SourceWheelzy, CAST(N'2026-03-12' AS DATE), @Vp1),
-        (N'TESTVEH0000000002', 2015, N'Honda',      N'Civic',     1, 1, 112000,  1200.00, N'Seed · motor ok',                 @SourcePebble,  CAST(N'2026-04-01' AS DATE), @Vp1),
+        (N'TESTVEH0000000002', 2015, N'Honda',      N'Civic',     1, 1, 112000,  1200.00, N'Seed · motor ok',                 @SourcePeddle,  CAST(N'2026-04-01' AS DATE), @Vp1),
         (N'TESTVEH0000000003', 2012, N'Ford',       N'F-150',     1, 4, 145000,  2400.00, N'Seed · 4x4',                      @SourceFb,      CAST(N'2026-02-20' AS DATE), @Vp2),
         (N'TESTVEH0000000004', 2020, N'Chevrolet',  N'Silverado', 1, 5,  67000,  3100.00, N'Seed · cabina doble',             @SourceWheelzy, CAST(N'2026-05-08' AS DATE), @Vp2),
         (N'TESTVEH0000000005', 2008, N'Nissan',     N'Altima',    1, 1, 168000,   650.00, N'Seed · para partes',              @SourceOther,   CAST(N'2026-01-15' AS DATE), NULL),
-        (N'TESTVEH0000000006', 2016, N'BMW',        N'328i',      1, 2,  94000,  2200.00, N'Seed · RWD',                      @SourcePebble,  CAST(N'2026-06-02' AS DATE), @Vp3),
+        (N'TESTVEH0000000006', 2016, N'BMW',        N'328i',      1, 2,  94000,  2200.00, N'Seed · RWD',                      @SourcePeddle,  CAST(N'2026-06-02' AS DATE), @Vp3),
         (N'TESTVEH0000000007', 2019, N'Jeep',       N'Wrangler',  2, 4,  51000,  4500.00, N'Seed · manual',                   @SourceFb,      CAST(N'2026-06-18' AS DATE), NULL),
         (N'TESTVEH0000000008', 2014, N'Subaru',     N'Outback',   1, 3, 128000,  1500.00, N'Seed · AWD',                      @SourceWheelzy, CAST(N'2026-03-28' AS DATE), @Vp3),
         (N'TESTVEH0000000009', 2011, N'Hyundai',    N'Sonata',    1, 1, 155000,   700.00, N'Seed · pendiente ubicar',         @SourceOther,   CAST(N'2026-07-01' AS DATE), NULL),
-        (N'TESTVEH0000000010', 2017, N'GMC',        N'Sierra',    1, 4,  88000,  2800.00, N'Seed · buen estado cosmético',    @SourcePebble,  CAST(N'2026-07-10' AS DATE), @Vp1)
+        (N'TESTVEH0000000010', 2017, N'GMC',        N'Sierra',    1, 4,  88000,  2800.00, N'Seed · buen estado cosmético',    @SourcePeddle,  CAST(N'2026-07-10' AS DATE), @Vp1)
     ) AS v (Vin, [Year], Make, Model, TransmissionType, DriveType, Mileage, PurchasePrice, Observations, VehicleSourceId, AcquiredAt, PalletId)
 )
 INSERT INTO dbo.Vehicles

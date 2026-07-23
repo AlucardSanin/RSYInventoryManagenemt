@@ -25,6 +25,18 @@ public partial class Vehicle
     /// <summary>Optional acquisition purchase price.</summary>
     public decimal? PurchasePrice { get; set; }
 
+    /// <summary>Where the vehicle was obtained / picked up (address or place).</summary>
+    public string? AcquisitionLocation { get; set; }
+
+    public string? SellerName { get; set; }
+
+    public string? SellerPhone { get; set; }
+
+    public string? SellerEmail { get; set; }
+
+    /// <summary>Driver who picked up / collected the vehicle.</summary>
+    public string? PickupDriver { get; set; }
+
     public string? Observations { get; set; }
 
     public int VehicleSourceId { get; set; }

@@ -73,8 +73,9 @@
     public async Task OpenAsync(IEnumerable<string?> paths, int startIndex = 0)
     {
         _images = paths
+            .Select(MediaPaths.ToUrl)
             .Where(p => !string.IsNullOrWhiteSpace(p))
-            .Select(p => p!.Trim())
+            .Select(p => p!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 

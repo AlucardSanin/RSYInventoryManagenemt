@@ -88,7 +88,7 @@ else
                         <td style="width:3.25rem">
                             @if (!string.IsNullOrWhiteSpace(item.ImageRelativePath))
                             {
-                                <img class="thumb-img" src="@item.ImageRelativePath" alt="" />
+                                <img class="thumb-img" src="@MediaPaths.ToUrl(item.ImageRelativePath)" alt="" />
                             }
                         </td>
                         <td>

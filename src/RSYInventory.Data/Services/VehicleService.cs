@@ -93,6 +93,11 @@ public class VehicleService
         string? observations,
         int vehicleSourceId,
         DateTime acquiredAt,
+        string? acquisitionLocation = null,
+        string? sellerName = null,
+        string? sellerPhone = null,
+        string? sellerEmail = null,
+        string? pickupDriver = null,
         CancellationToken ct = default)
     {
         if (!_currentUser.CanAcquireVehicles && !_currentUser.CanEditInventory)
@@ -121,6 +126,11 @@ public class VehicleService
             Mileage = mileage,
             PurchasePrice = purchasePrice is null or <= 0 ? null : Math.Round(purchasePrice.Value, 2, MidpointRounding.AwayFromZero),
             Observations = observations,
+            AcquisitionLocation = NullIfWhiteSpace(acquisitionLocation),
+            SellerName = NullIfWhiteSpace(sellerName),
+            SellerPhone = NullIfWhiteSpace(sellerPhone),
+            SellerEmail = NullIfWhiteSpace(sellerEmail),
+            PickupDriver = NullIfWhiteSpace(pickupDriver),
             VehicleSourceId = vehicleSourceId,
             AcquiredAt = acquiredAt,
             AcquiredByUserId = _currentUser.UserId,
@@ -242,6 +252,11 @@ public class VehicleService
         string? observations,
         int vehicleSourceId,
         DateTime acquiredAt,
+        string? acquisitionLocation = null,
+        string? sellerName = null,
+        string? sellerPhone = null,
+        string? sellerEmail = null,
+        string? pickupDriver = null,
         CancellationToken ct = default)
     {
         if (!_currentUser.CanAcquireVehicles && !_currentUser.CanManageUsers)
@@ -277,12 +292,20 @@ public class VehicleService
             ? null
             : Math.Round(purchasePrice.Value, 2, MidpointRounding.AwayFromZero);
         vehicle.Observations = string.IsNullOrWhiteSpace(observations) ? null : observations.Trim();
+        vehicle.AcquisitionLocation = NullIfWhiteSpace(acquisitionLocation);
+        vehicle.SellerName = NullIfWhiteSpace(sellerName);
+        vehicle.SellerPhone = NullIfWhiteSpace(sellerPhone);
+        vehicle.SellerEmail = NullIfWhiteSpace(sellerEmail);
+        vehicle.PickupDriver = NullIfWhiteSpace(pickupDriver);
         vehicle.VehicleSourceId = vehicleSourceId;
         vehicle.AcquiredAt = acquiredAt;
         vehicle.UpdatedAtUtc = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
     }
+
+    private static string? NullIfWhiteSpace(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     public async Task AssignLocationAsync(int vehicleId, int palletId, string? notes, CancellationToken ct = default)
     {

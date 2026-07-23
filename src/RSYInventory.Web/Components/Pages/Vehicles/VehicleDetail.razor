@@ -101,18 +101,38 @@ else if (_vehicle is not null && !_editing)
                     </div>
                     <div>
                         <dt>Precio de compra</dt>
-                        <dd>@(_vehicle.PurchasePrice is null ? "—" : _vehicle.PurchasePrice.Value.ToString("C2"))</dd>
+                        <dd>@UsdMoney.FormatOrDash(_vehicle.PurchasePrice)</dd>
                     </div>
                     <div>
                         <dt>Fuente</dt>
                         <dd>@(_vehicle.VehicleSource?.Name ?? "—")</dd>
                     </div>
                     <div>
+                        <dt>Lugar de obtención</dt>
+                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.AcquisitionLocation) ? "—" : _vehicle.AcquisitionLocation)</dd>
+                    </div>
+                    <div>
                         <dt>Fecha de adquisición</dt>
                         <dd>@_vehicle.AcquiredAt.ToString("yyyy-MM-dd")</dd>
                     </div>
                     <div>
-                        <dt>Ubicación</dt>
+                        <dt>Vendedor</dt>
+                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.SellerName) ? "—" : _vehicle.SellerName)</dd>
+                    </div>
+                    <div>
+                        <dt>Teléfono vendedor</dt>
+                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.SellerPhone) ? "—" : _vehicle.SellerPhone)</dd>
+                    </div>
+                    <div>
+                        <dt>Correo vendedor</dt>
+                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.SellerEmail) ? "—" : _vehicle.SellerEmail)</dd>
+                    </div>
+                    <div>
+                        <dt>Chofer que recogió</dt>
+                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.PickupDriver) ? "—" : _vehicle.PickupDriver)</dd>
+                    </div>
+                    <div>
+                        <dt>Ubicación en yarda</dt>
                         <dd>
                             @if (_vehicle.Pallet is null)
                             {
@@ -202,8 +222,8 @@ else if (_vehicle is not null && _editing)
                     <InputNumber class="form-control" @bind-Value="_edit.Mileage" />
                 </div>
                 <div class="col-md-3">
-                    <label class="form-label">Precio de compra</label>
-                    <InputNumber class="form-control" @bind-Value="_edit.PurchasePrice" />
+                    <label class="form-label" for="price-edit">Precio de compra (USD)</label>
+                    <UsdMoneyInput InputId="price-edit" @bind-Value="_edit.PurchasePrice" />
                 </div>
                 <div class="col-md-3">
                     <label class="form-label" for="trans-combo">Transmisión</label>
@@ -232,6 +252,26 @@ else if (_vehicle is not null && _editing)
                 <div class="col-md-3">
                     <label class="form-label">Fecha de adquisición *</label>
                     <InputDate class="form-control" @bind-Value="_edit.AcquiredAt" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Lugar de obtención</label>
+                    <InputText class="form-control" @bind-Value="_edit.AcquisitionLocation" placeholder="Dirección o ciudad donde se recogió" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Nombre del vendedor</label>
+                    <InputText class="form-control" @bind-Value="_edit.SellerName" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Teléfono</label>
+                    <InputText class="form-control" @bind-Value="_edit.SellerPhone" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Correo</label>
+                    <InputText class="form-control" @bind-Value="_edit.SellerEmail" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Chofer que recogió</label>
+                    <InputText class="form-control" @bind-Value="_edit.PickupDriver" placeholder="Nombre del chofer" />
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Agregar fotos</label>
@@ -333,7 +373,7 @@ else if (_vehicle is not null && _editing)
                     return;
                 }
 
-                _images = VehicleService.GetImagePaths(_vehicle).ToList();
+                _images = MediaPaths.ToUrls(VehicleService.GetImagePaths(_vehicle)).ToList();
             }, "Cargando vehículo…");
         }
         catch (Exception ex)
@@ -367,6 +407,11 @@ else if (_vehicle is not null && _editing)
             Mileage = _vehicle.Mileage,
             PurchasePrice = _vehicle.PurchasePrice,
             Observations = _vehicle.Observations,
+            AcquisitionLocation = _vehicle.AcquisitionLocation,
+            SellerName = _vehicle.SellerName,
+            SellerPhone = _vehicle.SellerPhone,
+            SellerEmail = _vehicle.SellerEmail,
+            PickupDriver = _vehicle.PickupDriver,
             VehicleSourceId = _vehicle.VehicleSourceId,
             AcquiredAt = _vehicle.AcquiredAt
         };
@@ -584,7 +629,12 @@ else if (_vehicle is not null && _editing)
                     _edit.PurchasePrice,
                     _edit.Observations,
                     _edit.VehicleSourceId,
-                    _edit.AcquiredAt);
+                    _edit.AcquiredAt,
+                    _edit.AcquisitionLocation,
+                    _edit.SellerName,
+                    _edit.SellerPhone,
+                    _edit.SellerEmail,
+                    _edit.PickupDriver);
 
                 var failed = 0;
                 foreach (var file in _pendingFiles)
@@ -647,6 +697,11 @@ else if (_vehicle is not null && _editing)
         public int? Mileage { get; set; }
         public decimal? PurchasePrice { get; set; }
         public string? Observations { get; set; }
+        public string? AcquisitionLocation { get; set; }
+        public string? SellerName { get; set; }
+        public string? SellerPhone { get; set; }
+        public string? SellerEmail { get; set; }
+        public string? PickupDriver { get; set; }
         public int VehicleSourceId { get; set; }
         public DateTime AcquiredAt { get; set; }
     }

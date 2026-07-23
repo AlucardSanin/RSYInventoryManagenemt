@@ -889,6 +889,12 @@ code, .mono {
     }
 }
 
+.money-input__prefix {
+    font-weight: 700;
+    color: var(--rsy-ink);
+    background: #f1f5f9;
+}
+
 .image-upload-hint {
     margin-top: 0.35rem;
     color: var(--rsy-muted);

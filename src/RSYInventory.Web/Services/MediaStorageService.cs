@@ -41,7 +41,7 @@ public sealed class MediaStorageService(IWebHostEnvironment env)
             await content.CopyToAsync(fs, cancellationToken);
         }
 
-        return relativeDir.Replace('\\', '/') + "/" + fileName;
+        return "/" + relativeDir.Replace('\\', '/') + "/" + fileName;
     }
 
     private static string? SanitizeFolder(string? value)
