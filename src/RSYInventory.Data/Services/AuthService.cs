@@ -116,6 +116,39 @@ public sealed class AuthService
         _state.Clear();
     }
 
+    /// <summary>
+    /// Verifies that <paramref name="password"/> belongs to an active SystemAdmin.
+    /// Prefers the current user when they are admin; otherwise accepts any active admin password.
+    /// </summary>
+    public async Task VerifySystemAdminPasswordAsync(string password, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(password))
+            throw new InvalidOperationException("La contraseña de administrador es obligatoria.");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+
+        var adminCode = (int)AppRole.SystemAdmin;
+        var admins = await db.Users
+            .Include(u => u.Roles)
+            .Where(u => u.IsActive && u.Roles.Any(r => r.Code == adminCode))
+            .ToListAsync(ct);
+
+        if (admins.Count == 0)
+            throw new InvalidOperationException("No hay usuarios administradores activos en el sistema.");
+
+        if (_state.Snapshot is { } current && current.Roles.Contains(AppRole.SystemAdmin))
+        {
+            var me = admins.FirstOrDefault(u => u.Id == current.UserId);
+            if (me is not null && _passwords.Verify(me, password))
+                return;
+        }
+
+        if (admins.Any(u => _passwords.Verify(u, password)))
+            return;
+
+        throw new InvalidOperationException("Contraseña de administrador incorrecta.");
+    }
+
     private async Task<bool> TrySignInByUserNameAsync(string userName)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();

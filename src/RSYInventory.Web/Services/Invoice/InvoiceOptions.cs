@@ -24,3 +24,19 @@ public sealed class SmtpOptions
     public string FromEmail { get; set; } = "rodriguezyardclayton@gmail.com";
     public string FromDisplayName { get; set; } = "Rodriguez Salvage Yard";
 }
+
+public sealed class DocuSealOptions
+{
+    public const string SectionName = "DocuSeal";
+
+    public bool Enabled { get; set; }
+    public string BaseUrl { get; set; } = "http://166.1.85.41:8080";
+    public string ApiKey { get; set; } = string.Empty;
+    public int TemplateId { get; set; } = 1;
+    /// <summary>Must match the role on fields in the DocuSeal master template.</summary>
+    public string SellerRole { get; set; } = DocuSealReceiptFields.DefaultSellerRole;
+    public string BuyerRole { get; set; } = "Segunda Parte";
+    public string BuyerEmail { get; set; } = "rodriguezyardclayton@gmail.com";
+    /// <summary>If true, DocuSeal emails the seller. Self-hosted needs SMTP in DocuSeal.</summary>
+    public bool SendEmail { get; set; }
+}

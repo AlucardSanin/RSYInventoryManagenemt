@@ -439,6 +439,111 @@ public class VehicleService
         });
     }
 
+    public async Task SaveInvoiceDraftAsync(
+        int vehicleId,
+        int templateId,
+        string unsignedPdfRelativePath,
+        CancellationToken ct = default)
+    {
+        if (!_currentUser.CanEditVehicles)
+            throw new UnauthorizedAccessException("No tiene permiso para generar recibos de compra.");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var vehicle = await db.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+            ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+        vehicle.InvoiceTemplateId = templateId;
+        vehicle.UnsignedPdfRelativePath = unsignedPdfRelativePath;
+        vehicle.SignedPdfRelativePath = null;
+        vehicle.DocuSealSubmissionId = null;
+        vehicle.SellerSigningUrl = null;
+        vehicle.SignatureSentAtUtc = null;
+        vehicle.SignedAtUtc = null;
+        vehicle.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task UpdateUnsignedPdfPathAsync(
+        int vehicleId,
+        string unsignedPdfRelativePath,
+        CancellationToken ct = default)
+    {
+        if (!_currentUser.CanEditVehicles)
+            throw new UnauthorizedAccessException("No tiene permiso para actualizar recibos.");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var vehicle = await db.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+            ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+        vehicle.UnsignedPdfRelativePath = unsignedPdfRelativePath;
+        vehicle.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task SaveSignatureSentAsync(
+        int vehicleId,
+        int submissionId,
+        string sellerSigningUrl,
+        CancellationToken ct = default)
+    {
+        if (!_currentUser.CanEditVehicles)
+            throw new UnauthorizedAccessException("No tiene permiso para enviar enlaces de firma.");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var vehicle = await db.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+            ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+        vehicle.DocuSealSubmissionId = submissionId;
+        vehicle.SellerSigningUrl = sellerSigningUrl;
+        vehicle.SignatureSentAtUtc = DateTime.UtcNow;
+        vehicle.SignedAtUtc = null;
+        vehicle.SignedPdfRelativePath = null;
+        vehicle.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task SaveSignedInvoiceAsync(
+        int vehicleId,
+        string signedPdfRelativePath,
+        CancellationToken ct = default)
+    {
+        if (!_currentUser.CanEditVehicles)
+            throw new UnauthorizedAccessException("No tiene permiso para actualizar recibos firmados.");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var vehicle = await db.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+            ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+        vehicle.SignedPdfRelativePath = signedPdfRelativePath;
+        vehicle.SignedAtUtc = DateTime.UtcNow;
+        vehicle.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Clears signing artifacts so a new receipt can replace the previous one.
+    /// Keeps the existing invoice number.
+    /// </summary>
+    public async Task ClearInvoiceForRegenerateAsync(int vehicleId, CancellationToken ct = default)
+    {
+        if (!_currentUser.CanEditVehicles)
+            throw new UnauthorizedAccessException("No tiene permiso para regenerar recibos.");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var vehicle = await db.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+            ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+        vehicle.InvoiceTemplateId = null;
+        vehicle.DocuSealSubmissionId = null;
+        vehicle.SellerSigningUrl = null;
+        vehicle.UnsignedPdfRelativePath = null;
+        vehicle.SignedPdfRelativePath = null;
+        vehicle.SignatureSentAtUtc = null;
+        vehicle.SignedAtUtc = null;
+        vehicle.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
     private static string? NullIfWhiteSpace(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 

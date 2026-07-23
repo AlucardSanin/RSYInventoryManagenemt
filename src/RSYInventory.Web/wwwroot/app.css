@@ -1037,26 +1037,33 @@ code, .mono {
 
 .invoice-dialog__preview {
     flex: 1 1 auto;
-    min-height: 320px;
+    min-height: 240px;
     padding: 0.75rem 1.15rem;
     background: #f4f7fa;
+    overflow: hidden;
+    /* Keep native PDF plugins from painting over the footer */
+    isolation: isolate;
 }
 
 .invoice-dialog__frame {
+    display: block;
     width: 100%;
-    height: min(52vh, 560px);
+    height: min(48vh, 520px);
     border: 1px solid #d7dee7;
     border-radius: 8px;
     background: #fff;
 }
 
 .invoice-dialog__meta {
+    position: relative;
+    z-index: 2;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.45rem 1rem;
-    padding: 0.65rem 1.15rem;
+    padding: 0.75rem 1.15rem;
     font-size: 0.88rem;
     border-top: 1px solid #e8eef4;
+    background: #fff;
 }
 
 .invoice-dialog__meta span {
@@ -1069,18 +1076,66 @@ code, .mono {
 }
 
 .invoice-dialog__actions {
+    position: relative;
+    z-index: 2;
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
     padding: 0.75rem 1.15rem 1rem;
     border-top: 1px solid #e8eef4;
+    background: #fff;
 }
 
 .invoice-dialog__hint {
+    position: relative;
+    z-index: 2;
     margin: 0;
     padding: 0 1.15rem 1rem;
     color: var(--rsy-muted);
     font-size: 0.8rem;
+    background: #fff;
+}
+
+.invoice-template-list {
+    display: grid;
+    gap: 0.65rem;
+    padding: 0 1.15rem 0.25rem;
+    max-height: min(42vh, 320px);
+    overflow: auto;
+}
+
+.invoice-template-card {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    margin: 0;
+    padding: 0.75rem 0.85rem;
+    border: 1px solid #d9e2ec;
+    border-radius: 8px;
+    cursor: pointer;
+    background: #fff;
+}
+
+.invoice-template-card.is-selected {
+    border-color: #1f424c;
+    box-shadow: inset 0 0 0 1px #1f424c;
+    background: #f4f8f9;
+}
+
+.invoice-template-card input {
+    margin-top: 0.2rem;
+}
+
+.invoice-template-card__body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+}
+
+.invoice-template-card__body .badge {
+    width: fit-content;
+    margin-top: 0.25rem;
 }
 
 @media (max-width: 640.98px) {

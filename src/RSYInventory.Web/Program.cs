@@ -42,9 +42,21 @@ builder.Services.Configure<CompanyInvoiceOptions>(
     builder.Configuration.GetSection(CompanyInvoiceOptions.SectionName));
 builder.Services.Configure<SmtpOptions>(
     builder.Configuration.GetSection(SmtpOptions.SectionName));
+builder.Services.Configure<DocuSealOptions>(
+    builder.Configuration.GetSection(DocuSealOptions.SectionName));
 
 builder.Services.AddSingleton<PurchaseInvoicePdfService>();
+builder.Services.AddSingleton<DocuSealMasterTemplateService>();
 builder.Services.AddScoped<InvoiceEmailService>();
+builder.Services.AddHttpClient<DocuSealClient>((sp, client) =>
+{
+    var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<DocuSealOptions>>().Value;
+    var baseUrl = string.IsNullOrWhiteSpace(opts.BaseUrl)
+        ? "http://166.1.85.41:8080"
+        : opts.BaseUrl.TrimEnd('/') + "/";
+    client.BaseAddress = new Uri(baseUrl);
+    client.Timeout = TimeSpan.FromSeconds(60);
+});
 builder.Services.AddScoped<VehicleInvoiceService>();
 
 var app = builder.Build();

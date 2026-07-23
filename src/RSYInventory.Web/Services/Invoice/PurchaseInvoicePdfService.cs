@@ -20,6 +20,7 @@ public sealed class PurchaseInvoicePdfService
     private static readonly string Muted = "#4B5563";
 
     private readonly CompanyInvoiceOptions _company;
+    private readonly DocuSealOptions _docuSeal;
     private readonly IWebHostEnvironment _env;
 
     static PurchaseInvoicePdfService()
@@ -27,13 +28,17 @@ public sealed class PurchaseInvoicePdfService
         QuestPDF.Settings.License = LicenseType.Community;
     }
 
-    public PurchaseInvoicePdfService(IOptions<CompanyInvoiceOptions> company, IWebHostEnvironment env)
+    public PurchaseInvoicePdfService(
+        IOptions<CompanyInvoiceOptions> company,
+        IOptions<DocuSealOptions> docuSeal,
+        IWebHostEnvironment env)
     {
         _company = company.Value;
+        _docuSeal = docuSeal.Value;
         _env = env;
     }
 
-    public PurchaseInvoiceModel BuildModel(Vehicle vehicle, int documentNumber)
+    public PurchaseInvoiceModel BuildModel(Vehicle vehicle, int documentNumber, InvoiceTemplate? template = null)
     {
         var description = string.Join(' ', new[]
         {
@@ -45,15 +50,24 @@ public sealed class PurchaseInvoicePdfService
         if (string.IsNullOrWhiteSpace(description))
             description = "Vehicle";
 
+        var buyerName = template?.BuyerCompanyName ?? _company.Name;
+        var buyerAuth = template?.BuyerAuthorizedName
+                        ?? "RODRIGUEZ SALVAGE YARD";
+        var address = template?.AddressLine1 ?? _company.AddressLine1;
+        var city = template?.CityStateZip ?? _company.CityStateZip;
+        var email = template?.Email ?? _company.Email;
+
         return new PurchaseInvoiceModel
         {
             DocumentNumber = documentNumber,
             PurchaseDate = vehicle.AcquiredAt.Date,
             PaymentMethod = vehicle.PaymentMethod,
-            BuyerName = _company.Name,
-            BuyerAddressLine1 = _company.AddressLine1,
-            BuyerCityStateZip = _company.CityStateZip,
-            BuyerEmail = _company.Email,
+            BuyerName = buyerName,
+            BuyerAuthorizedName = buyerAuth,
+            BuyerAddressLine1 = address,
+            BuyerCityStateZip = city,
+            BuyerEmail = email,
+            TemplateName = template?.Name,
             SellerName = vehicle.SellerName,
             SellerPhone = vehicle.SellerPhone,
             SellerEmail = vehicle.SellerEmail,
@@ -95,7 +109,7 @@ public sealed class PurchaseInvoicePdfService
                             if (File.Exists(logoPath))
                                 c.Height(64).Width(168).Image(logoPath).FitArea();
                             else
-                                c.Text("RODRÍGUEZ SALVAGE YARD").Bold().FontSize(14);
+                                c.Text(model.BuyerAuthorizedName).Bold().FontSize(14);
                         });
 
                         row.ConstantItem(150).AlignRight().AlignMiddle()
@@ -202,6 +216,10 @@ public sealed class PurchaseInvoicePdfService
 
                         body.Item().PaddingTop(14).Row(row =>
                         {
+                            var buyerAuthName = string.IsNullOrWhiteSpace(model.BuyerAuthorizedName)
+                                ? "RODRIGUEZ SALVAGE YARD"
+                                : model.BuyerAuthorizedName;
+
                             row.RelativeItem().PaddingRight(14).Column(sig =>
                             {
                                 sig.Item().Text("Seller signature").Bold().FontSize(9);
@@ -216,9 +234,11 @@ public sealed class PurchaseInvoicePdfService
                             row.RelativeItem().PaddingLeft(14).Column(sig =>
                             {
                                 sig.Item().Text("Buyer (authorized)").Bold().FontSize(9);
-                                sig.Item().PaddingTop(18).LineHorizontal(1).LineColor(Colors.Black);
+                                sig.Item().PaddingTop(10).Text(buyerAuthName).SemiBold().FontSize(10);
+                                sig.Item().PaddingTop(2).LineHorizontal(1).LineColor(Colors.Black);
                                 sig.Item().PaddingTop(2).Text("Signature").FontSize(7.5f).FontColor(Muted);
-                                sig.Item().PaddingTop(12).LineHorizontal(1).LineColor(Colors.Black);
+                                sig.Item().PaddingTop(8).Text(buyerAuthName).SemiBold().FontSize(10);
+                                sig.Item().PaddingTop(2).LineHorizontal(1).LineColor(Colors.Black);
                                 sig.Item().PaddingTop(2).Text("Printed name").FontSize(7.5f).FontColor(Muted);
                                 sig.Item().PaddingTop(12).LineHorizontal(1).LineColor(Colors.Black);
                                 sig.Item().PaddingTop(2).Text("Date").FontSize(7.5f).FontColor(Muted);
@@ -228,6 +248,187 @@ public sealed class PurchaseInvoicePdfService
                 });
 
                 // Full-bleed footer on the page background (outside content margins).
+                var pageWidth = PageSizes.Letter.Width;
+                var footerHeight = pageWidth * (456f / 1836f);
+                page.MarginBottom(footerHeight);
+                page.Background().AlignBottom().Height(footerHeight).Element(footer =>
+                {
+                    if (File.Exists(footerPath))
+                        footer.Image(footerPath).FitWidth();
+                    else
+                        footer.Background("#1F424C");
+                });
+            });
+        });
+
+        return document.GeneratePdf();
+    }
+
+    /// <summary>
+    /// Blank tagged PDF for a one-time upload in the DocuSeal UI (free).
+    /// DocuSeal converts {{tags}} into fields; our API then prefills those fields per vehicle.
+    /// </summary>
+    public byte[] GenerateDocuSealMasterTemplatePdf()
+    {
+        var logoPath = Path.Combine(_env.WebRootPath, "invoice", "rsy-invoice-logo.png");
+        var footerPath = Path.Combine(_env.WebRootPath, "invoice", "rsy-invoice-footer.png");
+        var role = string.IsNullOrWhiteSpace(_docuSeal.SellerRole) ? "Primera Parte" : _docuSeal.SellerRole.Trim();
+
+        string T(string name, string type = "text")
+            => DocuSealReceiptFields.TextTag(name, type, role);
+
+        var document = Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                page.Size(PageSizes.Letter);
+                page.MarginLeft(44);
+                page.MarginRight(44);
+                page.MarginTop(24);
+                page.MarginBottom(0);
+                page.DefaultTextStyle(x => x.FontSize(9.5f).FontColor(Colors.Black).FontFamily(Fonts.Arial));
+                page.PageColor(Colors.White);
+
+                page.Content().Column(col =>
+                {
+                    col.Item().Row(row =>
+                    {
+                        row.RelativeItem().Element(c =>
+                        {
+                            if (File.Exists(logoPath))
+                                c.Height(64).Width(168).Image(logoPath).FitArea();
+                            else
+                                c.Text("RODRIGUEZ SALVAGE YARD").Bold().FontSize(14);
+                        });
+
+                        row.ConstantItem(200).AlignRight().AlignMiddle()
+                            .Text($"NO. {T(DocuSealReceiptFields.DocumentNumber)}")
+                            .Bold().FontSize(11);
+                    });
+
+                    col.Item().ExtendVertical().AlignMiddle().Column(body =>
+                    {
+                        body.Item().Text("VEHICLE PURCHASE ACKNOWLEDGEMENT")
+                            .Bold().FontSize(15);
+
+                        body.Item().PaddingTop(2).Text("Bill of sale / ownership transfer receipt")
+                            .FontSize(8).FontColor(Muted);
+
+                        body.Item().PaddingTop(8).Text(text =>
+                        {
+                            text.Span("Purchase date: ").Bold();
+                            text.Span(T(DocuSealReceiptFields.PurchaseDate));
+                        });
+
+                        body.Item().PaddingTop(10).Element(c => SectionTitle(c, "Vehicle"));
+                        body.Item().PaddingTop(4).Text(text =>
+                        {
+                            text.Span("Y/M/M: ").FontColor(Muted);
+                            text.Span(T(DocuSealReceiptFields.VehicleYmm));
+                            text.Span("    VIN: ").FontColor(Muted);
+                            text.Span(T(DocuSealReceiptFields.Vin)).SemiBold();
+                        });
+
+                        body.Item().PaddingTop(10).Row(row =>
+                        {
+                            row.RelativeItem().PaddingRight(8).Column(seller =>
+                            {
+                                seller.Item().Element(c => SectionTitle(c, "Seller"));
+                                seller.Item().PaddingTop(4).Text(T(DocuSealReceiptFields.SellerName)).SemiBold();
+                                seller.Item().Text(T(DocuSealReceiptFields.SellerAddress)).FontSize(8.5f);
+                                seller.Item().Text(T(DocuSealReceiptFields.SellerPhone)).FontSize(8.5f);
+                                seller.Item().Text(T(DocuSealReceiptFields.SellerEmail)).FontSize(8.5f);
+                            });
+
+                            row.RelativeItem().PaddingLeft(8).Column(buyer =>
+                            {
+                                buyer.Item().Element(c => SectionTitle(c, "Buyer"));
+                                buyer.Item().PaddingTop(4).Text(T(DocuSealReceiptFields.BuyerName)).SemiBold();
+                                buyer.Item().Text(T(DocuSealReceiptFields.BuyerAddress)).FontSize(8.5f);
+                                buyer.Item().Text(T(DocuSealReceiptFields.BuyerEmail)).FontSize(8.5f);
+                            });
+                        });
+
+                        body.Item().PaddingTop(10).Element(c => SectionTitle(c, "Transaction"));
+                        body.Item().PaddingTop(4).Table(table =>
+                        {
+                            table.ColumnsDefinition(columns =>
+                            {
+                                columns.RelativeColumn(3.5f);
+                                columns.RelativeColumn(1.2f);
+                                columns.RelativeColumn(1.2f);
+                            });
+
+                            table.Header(header =>
+                            {
+                                header.Cell().Element(TableHeaderCell).Text("Description");
+                                header.Cell().Element(TableHeaderCell).AlignRight().Text("Price");
+                                header.Cell().Element(TableHeaderCell).AlignRight().Text("Amount");
+                            });
+
+                            table.Cell().Element(TableBodyCell).Text(T(DocuSealReceiptFields.Description));
+                            table.Cell().Element(TableBodyCell).AlignRight().Text(T(DocuSealReceiptFields.Price));
+                            table.Cell().Element(TableBodyCell).AlignRight().Text(T(DocuSealReceiptFields.Price));
+                        });
+
+                        body.Item().PaddingTop(2).LineHorizontal(1).LineColor(Colors.Black);
+                        body.Item().PaddingTop(4).Row(row =>
+                        {
+                            row.RelativeItem();
+                            row.ConstantItem(90).AlignRight().Text("Sale price").Bold();
+                            row.ConstantItem(100).AlignRight().Text(T(DocuSealReceiptFields.Price)).Bold();
+                        });
+                        body.Item().PaddingTop(2).LineHorizontal(1).LineColor(Colors.Black);
+
+                        body.Item().PaddingTop(6).Text(text =>
+                        {
+                            text.Span("Payment method: ").Bold();
+                            text.Span(T(DocuSealReceiptFields.PaymentMethod));
+                        });
+
+                        body.Item().PaddingTop(10).Element(c => SectionTitle(c, "Condition"));
+                        body.Item().PaddingTop(4).Text(text =>
+                        {
+                            text.DefaultTextStyle(x => x.FontSize(8.5f));
+                            text.Span("AS-IS. ").Bold();
+                            text.Span(
+                                "Seller certifies legal ownership and transfers the vehicle to Buyer with no warranties. " +
+                                "Buyer acknowledges receipt of ownership and possession on the purchase date above.");
+                        });
+
+                        body.Item().PaddingTop(14).Row(row =>
+                        {
+                            row.RelativeItem().PaddingRight(14).Column(sig =>
+                            {
+                                sig.Item().Text("Seller signature").Bold().FontSize(9);
+                                sig.Item().PaddingTop(10)
+                                    .Text(T(DocuSealReceiptFields.SellerSignature, "signature"))
+                                    .FontSize(8);
+                                sig.Item().PaddingTop(2).Text("Signature").FontSize(7.5f).FontColor(Muted);
+                                sig.Item().PaddingTop(12).LineHorizontal(1).LineColor(Colors.Black);
+                                sig.Item().PaddingTop(2).Text("Printed name").FontSize(7.5f).FontColor(Muted);
+                                sig.Item().PaddingTop(10)
+                                    .Text(T(DocuSealReceiptFields.SellerDate, "date"))
+                                    .FontSize(8);
+                                sig.Item().PaddingTop(2).Text("Date").FontSize(7.5f).FontColor(Muted);
+                            });
+
+                            row.RelativeItem().PaddingLeft(14).Column(sig =>
+                            {
+                                sig.Item().Text("Buyer (authorized)").Bold().FontSize(9);
+                                sig.Item().PaddingTop(10).Text("RODRIGUEZ SALVAGE YARD").SemiBold().FontSize(10);
+                                sig.Item().PaddingTop(2).LineHorizontal(1).LineColor(Colors.Black);
+                                sig.Item().PaddingTop(2).Text("Signature").FontSize(7.5f).FontColor(Muted);
+                                sig.Item().PaddingTop(8).Text("RODRIGUEZ SALVAGE YARD").SemiBold().FontSize(10);
+                                sig.Item().PaddingTop(2).LineHorizontal(1).LineColor(Colors.Black);
+                                sig.Item().PaddingTop(2).Text("Printed name").FontSize(7.5f).FontColor(Muted);
+                                sig.Item().PaddingTop(12).LineHorizontal(1).LineColor(Colors.Black);
+                                sig.Item().PaddingTop(2).Text("Date").FontSize(7.5f).FontColor(Muted);
+                            });
+                        });
+                    });
+                });
+
                 var pageWidth = PageSizes.Letter.Width;
                 var footerHeight = pageWidth * (456f / 1836f);
                 page.MarginBottom(footerHeight);

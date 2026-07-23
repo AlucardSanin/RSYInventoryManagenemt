@@ -1,0 +1,339 @@
+@page "/admin/invoice-templates"
+@inject InvoiceTemplateService Templates
+@inject VehicleInvoiceService Invoices
+@inject ICurrentUserService CurrentUser
+@inject MediaStorageService Media
+@inject UiBusyService Busy
+@inject ToastService Toasts
+@using Microsoft.AspNetCore.Components.Forms
+@using RSYInventory.Data.Entities
+@using RSYInventory.Web.Services.Invoice
+
+<PageTitle>Plantillas de recibo</PageTitle>
+
+<PageHeader Title="Plantillas de recibo"
+            Eyebrow="Administración"
+            Lead="Define a nombre de qué empresa se emiten los acuses de compra. Hoy se usa el layout estándar; más adelante puedes adjuntar un PDF propio." />
+
+@if (!_ready)
+{
+    <div class="page-panel"><p class="mb-0 text-muted">Cargando…</p></div>
+}
+else if (!CurrentUser.CanManageUsers)
+{
+    <div class="alert alert-warning">Solo el administrador puede gestionar plantillas.</div>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-danger">@_error</div>
+    }
+
+    <div class="page-panel mb-3">
+        <h2 class="page-panel__title">DocuSeal (firma electrónica)</h2>
+        <div class="alert alert-warning mb-3">
+            Si en la firma ves texto como <code>{{{{VIN;type=text...}}}}</code>, la plantilla está mal:
+            esos tags no se convirtieron en campos. Hay que crear una <strong>plantilla nueva</strong> subiendo el DOCX
+            (no sirve solo reemplazar el PDF viejo).
+        </div>
+        <ol class="mb-3">
+            <li>Descarga el DOCX maestro abajo.</li>
+            <li>En DocuSeal → <strong>New Template</strong> → sube el <code>.docx</code>.</li>
+            <li>Verifica que aparezcan cajas de campos (VIN, SellerName, firma…), no llaves <code>{{{{}}}}</code>.</li>
+            <li>El rol del firmante debe ser <code>Seller</code> (igual que <code>DocuSeal:SellerRole</code>).</li>
+            <li>Copia el ID de la plantilla a <code>DocuSeal:TemplateId</code> y reinicia la app.</li>
+        </ol>
+        <button type="button" class="btn btn-outline-primary" disabled="@_busy" @onclick="DownloadDocuSealMasterAsync">
+            @(_busyDocuSeal ? "Generando…" : "Descargar DOCX maestro para DocuSeal")
+        </button>
+        @if (!string.IsNullOrEmpty(_docuSealDownloadUrl))
+        {
+            <a class="btn btn-link" href="@_docuSealDownloadUrl" download="docuseal-receipt-master.docx">
+                Guardar archivo…
+            </a>
+        }
+    </div>
+
+    <div class="page-panel mb-3">
+        <h2 class="page-panel__title">Nueva plantilla</h2>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label">Nombre interno *</label>
+                <input class="form-control" @bind="_name" placeholder="Ej. Otra empresa LLC" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Empresa compradora (Buyer) *</label>
+                <input class="form-control" @bind="_company" placeholder="Razón social en el recibo" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Nombre en firma *</label>
+                <input class="form-control" @bind="_authorized" placeholder="RODRIGUEZ SALVAGE YARD" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Correo *</label>
+                <input class="form-control" @bind="_email" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Dirección *</label>
+                <input class="form-control" @bind="_address" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Ciudad / estado / ZIP *</label>
+                <input class="form-control" @bind="_city" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Teléfono</label>
+                <input class="form-control" @bind="_phone" />
+            </div>
+            <div class="col-12">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="tpl-default" @bind="_makeDefault" />
+                    <label class="form-check-label" for="tpl-default">Marcar como predeterminada</label>
+                </div>
+            </div>
+            <div class="col-12">
+                <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="CreateAsync">
+                    @(_busy ? "Guardando…" : "Crear plantilla")
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="page-panel">
+        <h2 class="page-panel__title">Plantillas</h2>
+        @if (_items is null)
+        {
+            <p class="text-muted mb-0">Cargando…</p>
+        }
+        else if (_items.Count == 0)
+        {
+            <p class="mb-0">No hay plantillas. Ejecuta <code>012_InvoiceTemplates.sql</code>.</p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Nombre</th>
+                            <th>Comprador</th>
+                            <th>Firma</th>
+                            <th>PDF</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var t in _items)
+                        {
+                            <tr class="@(!t.IsActive ? "table-secondary" : null)">
+                                <td>
+                                    <strong>@t.Name</strong>
+                                    @if (t.IsDefault)
+                                    {
+                                        <span class="badge text-bg-secondary ms-1">Default</span>
+                                    }
+                                    @if (!t.IsActive)
+                                    {
+                                        <span class="badge text-bg-light ms-1">Inactiva</span>
+                                    }
+                                </td>
+                                <td>@t.BuyerCompanyName</td>
+                                <td><code>@t.BuyerAuthorizedName</code></td>
+                                <td>
+                                    @if (string.IsNullOrWhiteSpace(t.PdfRelativePath))
+                                    {
+                                        <span class="text-muted">Layout estándar</span>
+                                    }
+                                    else
+                                    {
+                                        <span>Adjunto</span>
+                                    }
+                                    <InputFile class="form-control form-control-sm mt-1"
+                                               OnChange="e => OnPdfSelected(e, t.Id)"
+                                               accept=".pdf,application/pdf" />
+                                </td>
+                                <td class="text-nowrap">
+                                    @if (!t.IsDefault && t.IsActive)
+                                    {
+                                        <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_busy"
+                                                @onclick="@(() => SetDefaultAsync(t.Id))">
+                                            Predeterminada
+                                        </button>
+                                    }
+                                    @if (t.IsActive && !t.IsDefault)
+                                    {
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy"
+                                                @onclick="@(() => SetActiveAsync(t.Id, false))">
+                                            Desactivar
+                                        </button>
+                                    }
+                                    @if (!t.IsActive)
+                                    {
+                                        <button type="button" class="btn btn-sm btn-outline-success" disabled="@_busy"
+                                                @onclick="@(() => SetActiveAsync(t.Id, true))">
+                                            Activar
+                                        </button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-muted small mt-3 mb-0">
+                El PDF adjunto se guarda para uso futuro (DocuSeal / layout custom). Por ahora el recibo generado usa el layout estándar con los datos de la plantilla.
+            </p>
+        }
+    </div>
+}
+
+@code {
+    private bool _ready;
+    private bool _busy;
+    private bool _busyDocuSeal;
+    private string? _error;
+    private string? _docuSealDownloadUrl;
+    private IReadOnlyList<InvoiceTemplate>? _items;
+
+    private string _name = "";
+    private string _company = "";
+    private string _authorized = "";
+    private string _address = "";
+    private string _city = "";
+    private string _email = "";
+    private string _phone = "";
+    private bool _makeDefault;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _ready = true;
+        if (CurrentUser.CanManageUsers)
+            await ReloadAsync();
+    }
+
+    private async Task DownloadDocuSealMasterAsync()
+    {
+        if (_busy) return;
+        _busy = _busyDocuSeal = true;
+        _error = null;
+        try
+        {
+            var bytes = Invoices.GetDocuSealMasterTemplateDocx();
+            _docuSealDownloadUrl = $"data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{Convert.ToBase64String(bytes)}";
+            Toasts.Success("DOCX maestro listo. Créalo como plantilla NUEVA en DocuSeal (no reutilices la vieja).");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Toasts.Error(ex.Message);
+        }
+        finally
+        {
+            _busy = _busyDocuSeal = false;
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _error = null;
+        try
+        {
+            _items = await Templates.ListAllAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _items = [];
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        if (_busy) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Templates.CreateAsync(
+                _name, _company, _authorized, _address, _city, _email, _phone, _makeDefault);
+            _name = _company = _authorized = _address = _city = _email = _phone = "";
+            _makeDefault = false;
+            Toasts.Success("Plantilla creada.");
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Toasts.Error(ex.Message);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SetDefaultAsync(int id)
+    {
+        if (_busy) return;
+        _busy = true;
+        try
+        {
+            await Templates.SetDefaultAsync(id);
+            Toasts.Success("Plantilla predeterminada actualizada.");
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SetActiveAsync(int id, bool active)
+    {
+        if (_busy) return;
+        _busy = true;
+        try
+        {
+            await Templates.SetActiveAsync(id, active);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task OnPdfSelected(InputFileChangeEventArgs e, int templateId)
+    {
+        if (_busy) return;
+        var file = e.File;
+        if (file is null) return;
+
+        _busy = true;
+        try
+        {
+            await using var stream = file.OpenReadStream(maxAllowedSize: 12 * 1024 * 1024);
+            var path = await Media.SaveDocumentAsync(stream, file.Name, "invoice-templates", templateId);
+            await Templates.AttachPdfAsync(templateId, path);
+            Toasts.Success("PDF adjunto (para uso futuro).");
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

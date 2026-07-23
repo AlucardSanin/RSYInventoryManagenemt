@@ -41,16 +41,16 @@ public sealed class InvoiceEmailService
         message.To.Add(new MailboxAddress(
             string.IsNullOrWhiteSpace(toName) ? toEmail.Trim() : toName.Trim(),
             toEmail.Trim()));
-        message.Subject = $"Vehicle Purchase Acknowledgement #{invoiceNumber} — Rodriguez Salvage Yard";
+        message.Subject = $"Signed Vehicle Purchase Acknowledgement #{invoiceNumber} — Rodriguez Salvage Yard";
 
         var body = new TextPart("plain")
         {
             Text = $"""
                 Hello{(string.IsNullOrWhiteSpace(toName) ? "" : $" {toName.Trim()}")},
 
-                Attached is Vehicle Purchase Acknowledgement #{invoiceNumber} for the vehicle you sold to Rodriguez Salvage Yard, CORP.
+                Attached is the signed Vehicle Purchase Acknowledgement #{invoiceNumber} for the vehicle you sold to Rodriguez Salvage Yard, CORP.
 
-                Please review, sign, and keep a copy for your records.
+                Please keep a copy for your records.
 
                 Thank you,
                 Rodriguez Salvage Yard
@@ -85,6 +85,69 @@ public sealed class InvoiceEmailService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to send invoice email to {Email}", toEmail);
+            throw new InvalidOperationException($"No se pudo enviar el correo: {ex.Message}", ex);
+        }
+    }
+
+    public async Task SendSigningLinkAsync(
+        string toEmail,
+        string? toName,
+        int invoiceNumber,
+        string signingUrl,
+        CancellationToken ct = default)
+    {
+        if (!IsConfigured)
+            throw new InvalidOperationException(
+                "El correo no está configurado. Completa la sección Smtp en appsettings o User Secrets.");
+
+        if (string.IsNullOrWhiteSpace(toEmail))
+            throw new InvalidOperationException("No hay correo del vendedor para enviar el enlace de firma.");
+
+        if (string.IsNullOrWhiteSpace(signingUrl))
+            throw new InvalidOperationException("No hay enlace de firma para enviar.");
+
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress(_options.FromDisplayName, _options.FromEmail));
+        message.To.Add(new MailboxAddress(
+            string.IsNullOrWhiteSpace(toName) ? toEmail.Trim() : toName.Trim(),
+            toEmail.Trim()));
+        message.Subject = $"Firma el acuse de compra #{invoiceNumber} — Rodriguez Salvage Yard";
+
+        message.Body = new TextPart("plain")
+        {
+            Text = $"""
+                Hola{(string.IsNullOrWhiteSpace(toName) ? "" : $" {toName.Trim()}")},
+
+                Rodriguez Salvage Yard necesita tu firma en el acuse de compra #{invoiceNumber}.
+
+                Abre este enlace para firmar electrónicamente:
+                {signingUrl.Trim()}
+
+                Si el enlace no abre, cópialo y pégalo en tu navegador.
+
+                Gracias,
+                Rodriguez Salvage Yard
+                """
+        };
+
+        using var client = new SmtpClient();
+        try
+        {
+            var secure = _options.UseSsl
+                ? (_options.Port == 465 ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTls)
+                : SecureSocketOptions.None;
+
+            await client.ConnectAsync(_options.Host, _options.Port, secure, ct);
+
+            if (!string.IsNullOrWhiteSpace(_options.UserName))
+                await client.AuthenticateAsync(_options.UserName, _options.Password, ct);
+
+            await client.SendAsync(message, ct);
+            await client.DisconnectAsync(true, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send signing-link email to {Email}", toEmail);
             throw new InvalidOperationException($"No se pudo enviar el correo: {ex.Message}", ex);
         }
     }

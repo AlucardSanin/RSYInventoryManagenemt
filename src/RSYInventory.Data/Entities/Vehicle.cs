@@ -45,6 +45,20 @@ public partial class Vehicle
 
     public DateTime? InvoiceIssuedAtUtc { get; set; }
 
+    public int? InvoiceTemplateId { get; set; }
+
+    public int? DocuSealSubmissionId { get; set; }
+
+    public string? SellerSigningUrl { get; set; }
+
+    public string? UnsignedPdfRelativePath { get; set; }
+
+    public string? SignedPdfRelativePath { get; set; }
+
+    public DateTime? SignatureSentAtUtc { get; set; }
+
+    public DateTime? SignedAtUtc { get; set; }
+
     public string? Observations { get; set; }
 
     public int VehicleSourceId { get; set; }

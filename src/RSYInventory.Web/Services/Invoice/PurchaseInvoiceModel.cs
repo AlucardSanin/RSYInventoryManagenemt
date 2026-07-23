@@ -8,9 +8,11 @@ public sealed class PurchaseInvoiceModel
     public string? PaymentMethod { get; init; }
 
     public string BuyerName { get; init; } = string.Empty;
+    public string BuyerAuthorizedName { get; init; } = "RODRIGUEZ SALVAGE YARD";
     public string BuyerAddressLine1 { get; init; } = string.Empty;
     public string BuyerCityStateZip { get; init; } = string.Empty;
     public string BuyerEmail { get; init; } = string.Empty;
+    public string? TemplateName { get; init; }
 
     public string? SellerName { get; init; }
     public string? SellerPhone { get; init; }
