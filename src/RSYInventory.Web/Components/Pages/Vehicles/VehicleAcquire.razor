@@ -114,6 +114,10 @@
                         <label class="form-label" for="price-input">Precio de compra <span class="form-hint">(USD)</span></label>
                         <UsdMoneyInput InputId="price-input" @bind-Value="_model.PurchasePrice" Placeholder="2500.00" />
                     </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Método de pago <span class="form-hint">(opcional)</span></label>
+                        <InputText class="form-control" @bind-Value="_model.PaymentMethod" placeholder="Cash, Zelle, Check…" />
+                    </div>
                 </div>
             </div>
 
@@ -211,6 +215,8 @@
     </EditForm>
 </div>
 
+<InvoicePreviewDialog @ref="_invoiceDialog" OnClosed="OnInvoiceClosed" />
+
 @code {
     private const int MobileStepCount = 5;
 
@@ -245,6 +251,8 @@
     private bool _saving;
     private int _mobileStep = 1;
     private readonly List<IBrowserFile> _imageFiles = [];
+    private InvoicePreviewDialog? _invoiceDialog;
+    private int? _pendingInvoiceVehicleId;
 
     private string? YearValue => _model.Year?.ToString();
     private string? TransmissionValue => _model.TransmissionType is null ? null : ((int)_model.TransmissionType.Value).ToString();
@@ -552,7 +560,8 @@
                     _model.SellerName,
                     _model.SellerPhone,
                     _model.SellerEmail,
-                    _model.PickupDriver);
+                    _model.PickupDriver,
+                    _model.PaymentMethod);
 
                 if (_imageFiles.Count > 0)
                 {
@@ -575,8 +584,13 @@
                         _info = $"Vehículo guardado, pero {failed} foto(s) no se pudieron subir.";
                 }
 
-                Nav.NavigateTo("vehicles");
+                _pendingInvoiceVehicleId = created.Id;
             }, "Guardando adquisición…");
+
+            if (_pendingInvoiceVehicleId is int vehicleId && _invoiceDialog is not null)
+                await _invoiceDialog.OpenAsync(vehicleId);
+            else if (_pendingInvoiceVehicleId is int id)
+                Nav.NavigateTo($"vehicles/{id}");
         }
         catch (Exception ex)
         {
@@ -586,6 +600,14 @@
         {
             _saving = false;
         }
+    }
+
+    private void OnInvoiceClosed()
+    {
+        if (_pendingInvoiceVehicleId is int id)
+            Nav.NavigateTo($"vehicles/{id}");
+        else
+            Nav.NavigateTo("vehicles");
     }
 
     private sealed class AcquireModel
@@ -598,6 +620,7 @@
         public VehicleDriveType? DriveType { get; set; }
         public int? Mileage { get; set; }
         public decimal? PurchasePrice { get; set; }
+        public string? PaymentMethod { get; set; }
         public string? Observations { get; set; }
         public string? AcquisitionLocation { get; set; }
         public string? SellerName { get; set; }

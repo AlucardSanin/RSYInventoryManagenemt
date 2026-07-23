@@ -1,0 +1,162 @@
+@inject VehicleInvoiceService Invoices
+@inject UiBusyService Busy
+@using RSYInventory.Web.Services.Invoice
+
+@if (_open && _result is not null)
+{
+    <div class="invoice-dialog"
+         role="dialog"
+         aria-modal="true"
+         aria-labelledby="invoice-dialog-title"
+         @onclick="Close">
+        <div class="invoice-dialog__panel" @onclick:stopPropagation="true">
+            <div class="invoice-dialog__header">
+                <div>
+                    <h2 id="invoice-dialog-title" class="invoice-dialog__title">Factura #@_result.Model.InvoiceNumber</h2>
+                    <p class="invoice-dialog__lead">Revisa el PDF antes de enviarlo al vendedor.</p>
+                </div>
+                <button type="button" class="btn-close" aria-label="Cerrar" @onclick="Close"></button>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-danger py-2">@_error</div>
+            }
+            @if (!string.IsNullOrEmpty(_info))
+            {
+                <div class="alert alert-success py-2">@_info</div>
+            }
+
+            <div class="invoice-dialog__preview">
+                <object class="invoice-dialog__frame"
+                        data="@PdfDataUrl"
+                        type="application/pdf"
+                        title="Vista previa de factura">
+                    <p class="mb-2">Tu navegador no puede mostrar el PDF aquí.</p>
+                    <a class="btn btn-outline-primary" href="@PdfDataUrl" download="@_result.FileName">Descargar PDF</a>
+                </object>
+            </div>
+
+            <div class="invoice-dialog__meta">
+                <div><span>Vendedor</span> @(string.IsNullOrWhiteSpace(_result.Vehicle.SellerName) ? "—" : _result.Vehicle.SellerName)</div>
+                <div><span>Correo</span> @(string.IsNullOrWhiteSpace(_result.Vehicle.SellerEmail) ? "—" : _result.Vehicle.SellerEmail)</div>
+                <div><span>Teléfono</span> @(string.IsNullOrWhiteSpace(_result.Vehicle.SellerPhone) ? "—" : _result.Vehicle.SellerPhone)</div>
+                <div><span>Pago</span> @(string.IsNullOrWhiteSpace(_result.Model.PaymentMethod) ? "—" : _result.Model.PaymentMethod)</div>
+            </div>
+
+            <div class="invoice-dialog__actions">
+                <a class="btn btn-outline-secondary" href="@PdfDataUrl" download="@_result.FileName">Descargar</a>
+
+                <button type="button"
+                        class="btn btn-primary"
+                        disabled="@(_busy || !CanEmail)"
+                        title="@EmailDisabledReason"
+                        @onclick="SendEmailAsync">
+                    @(_busyEmail ? "Enviando…" : "Enviar por correo")
+                </button>
+
+                <button type="button" class="btn btn-link" @onclick="Close" disabled="@_busy">Cerrar</button>
+            </div>
+
+            @if (!Invoices.CanEmail)
+            {
+                <p class="invoice-dialog__hint">
+                    Configura <code>Smtp</code> (Enabled, Host, UserName, Password) para habilitar el envío por correo.
+                </p>
+            }
+            else if (string.IsNullOrWhiteSpace(_result.Vehicle.SellerEmail))
+            {
+                <p class="invoice-dialog__hint">
+                    Este vehículo no tiene correo del vendedor; puedes descargar el PDF o agregar el correo en la edición.
+                </p>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public EventCallback OnClosed { get; set; }
+
+    private bool _open;
+    private bool _busy;
+    private bool _busyEmail;
+    private string? _error;
+    private string? _info;
+    private VehicleInvoiceResult? _result;
+    private string PdfDataUrl =>
+        _result is null
+            ? string.Empty
+            : $"data:application/pdf;base64,{Convert.ToBase64String(_result.PdfBytes)}";
+
+    private bool CanEmail =>
+        _result is not null
+        && Invoices.CanEmail
+        && !string.IsNullOrWhiteSpace(_result.Vehicle.SellerEmail);
+
+    private string EmailDisabledReason
+    {
+        get
+        {
+            if (_result is null) return string.Empty;
+            if (string.IsNullOrWhiteSpace(_result.Vehicle.SellerEmail))
+                return "No hay correo del vendedor en este vehículo.";
+            if (!Invoices.CanEmail)
+                return "SMTP no está configurado.";
+            return "Enviar factura por correo";
+        }
+    }
+
+    public async Task OpenAsync(int vehicleId)
+    {
+        _error = null;
+        _info = null;
+        _result = null;
+        _open = true;
+
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                _result = await Invoices.GenerateAsync(vehicleId);
+            }, "Generando factura…");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _result = null;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SendEmailAsync()
+    {
+        if (_result is null || _busy || !CanEmail) return;
+        _error = null;
+        _busy = _busyEmail = true;
+        try
+        {
+            await Invoices.SendEmailAsync(_result);
+            _info = $"Factura enviada a {_result.Vehicle.SellerEmail}.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = _busyEmail = false;
+        }
+    }
+
+    private async Task Close()
+    {
+        if (_busy) return;
+        _open = false;
+        _result = null;
+        _error = null;
+        _info = null;
+        if (OnClosed.HasDelegate)
+            await OnClosed.InvokeAsync();
+    }
+}

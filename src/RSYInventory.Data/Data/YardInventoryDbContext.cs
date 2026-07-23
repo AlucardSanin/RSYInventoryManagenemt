@@ -194,6 +194,8 @@ public partial class YardInventoryDbContext : DbContext
             entity.Property(e => e.SellerPhone).HasMaxLength(40);
             entity.Property(e => e.SellerEmail).HasMaxLength(256);
             entity.Property(e => e.PickupDriver).HasMaxLength(150);
+            entity.Property(e => e.PaymentMethod).HasMaxLength(80);
+            entity.Property(e => e.InvoiceNumber);
             entity.Property(e => e.Vin).HasMaxLength(17);
 
             entity.HasOne(d => d.AcquiredByUser).WithMany(p => p.Vehicles)

@@ -9,6 +9,7 @@ This folder holds the SQL Server scripts that define and evolve the yard invento
 | `008_SampleVehiclesAndParts.sql` | Sample vehicles + engines/transmissions (no users). Safe to re-run. |
 | `009_VehicleSellerAndAcquisitionLocation.sql` | Peddle rename + seller/location fields on Vehicles. |
 | `010_VehiclePickupDriver.sql` | Driver who collected the vehicle (`PickupDriver`). |
+| `011_VehicleInvoiceAndPayment.sql` | Payment method, invoice number (from 1000), `InvoiceSequence`. |
 
 ## Workflow
 

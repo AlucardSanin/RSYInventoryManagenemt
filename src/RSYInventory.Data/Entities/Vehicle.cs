@@ -37,6 +37,14 @@ public partial class Vehicle
     /// <summary>Driver who picked up / collected the vehicle.</summary>
     public string? PickupDriver { get; set; }
 
+    /// <summary>How the purchase was paid (Cash, Zelle, Check, etc.).</summary>
+    public string? PaymentMethod { get; set; }
+
+    /// <summary>Purchase invoice number (assigned on first generate; starts at 1000).</summary>
+    public int? InvoiceNumber { get; set; }
+
+    public DateTime? InvoiceIssuedAtUtc { get; set; }
+
     public string? Observations { get; set; }
 
     public int VehicleSourceId { get; set; }

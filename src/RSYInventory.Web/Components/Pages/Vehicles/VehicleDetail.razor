@@ -132,6 +132,14 @@ else if (_vehicle is not null && !_editing)
                         <dd>@(string.IsNullOrWhiteSpace(_vehicle.PickupDriver) ? "—" : _vehicle.PickupDriver)</dd>
                     </div>
                     <div>
+                        <dt>Método de pago</dt>
+                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.PaymentMethod) ? "—" : _vehicle.PaymentMethod)</dd>
+                    </div>
+                    <div>
+                        <dt>Factura</dt>
+                        <dd>@(_vehicle.InvoiceNumber is null ? "Sin generar" : $"#{_vehicle.InvoiceNumber}")</dd>
+                    </div>
+                    <div>
                         <dt>Ubicación en yarda</dt>
                         <dd>
                             @if (_vehicle.Pallet is null)
@@ -155,6 +163,12 @@ else if (_vehicle is not null && !_editing)
                 </dl>
 
                 <div class="form-actions mt-3">
+                    @if (CurrentUser.CanAcquireVehicles || CurrentUser.CanManageUsers || CurrentUser.CanEditInventory)
+                    {
+                        <button type="button" class="btn btn-outline-primary" @onclick="GenerateInvoiceAsync" disabled="@Busy.IsBusy">
+                            @(_vehicle.InvoiceNumber is null ? "Generar factura" : $"Ver factura #{_vehicle.InvoiceNumber}")
+                        </button>
+                    }
                     @if (CurrentUser.CanEditInventory || CurrentUser.CanManageZones)
                     {
                         <a class="btn btn-outline-primary" href="@($"vehicles/{Id}/assign")">
@@ -274,6 +288,10 @@ else if (_vehicle is not null && _editing)
                     <InputText class="form-control" @bind-Value="_edit.PickupDriver" placeholder="Nombre del chofer" />
                 </div>
                 <div class="col-md-6">
+                    <label class="form-label">Método de pago</label>
+                    <InputText class="form-control" @bind-Value="_edit.PaymentMethod" placeholder="Cash, Zelle, Check…" />
+                </div>
+                <div class="col-md-6">
                     <label class="form-label">Agregar fotos</label>
                     <InputFile class="form-control" OnChange="OnImagesSelected" accept=".jpg,.jpeg,.png,.webp,image/*" multiple />
                     <div class="image-upload-hint">Se agregan a la galería existente (máx. 12 por vez).</div>
@@ -299,6 +317,7 @@ else if (_vehicle is not null && _editing)
 }
 
 <ImageViewer @ref="_viewer" />
+<InvoicePreviewDialog @ref="_invoiceDialog" OnClosed="OnInvoiceClosedAsync" />
 
 @code {
     [Parameter] public int Id { get; set; }
@@ -330,6 +349,7 @@ else if (_vehicle is not null && _editing)
     private readonly List<IBrowserFile> _pendingFiles = [];
     private CancellationTokenSource? _modelLoadCts;
     private ImageViewer? _viewer;
+    private InvoicePreviewDialog? _invoiceDialog;
     private bool _editing;
     private bool _saving;
     private bool _loadingModels;
@@ -412,6 +432,7 @@ else if (_vehicle is not null && _editing)
             SellerPhone = _vehicle.SellerPhone,
             SellerEmail = _vehicle.SellerEmail,
             PickupDriver = _vehicle.PickupDriver,
+            PaymentMethod = _vehicle.PaymentMethod,
             VehicleSourceId = _vehicle.VehicleSourceId,
             AcquiredAt = _vehicle.AcquiredAt
         };
@@ -634,7 +655,8 @@ else if (_vehicle is not null && _editing)
                     _edit.SellerName,
                     _edit.SellerPhone,
                     _edit.SellerEmail,
-                    _edit.PickupDriver);
+                    _edit.PickupDriver,
+                    _edit.PaymentMethod);
 
                 var failed = 0;
                 foreach (var file in _pendingFiles)
@@ -702,7 +724,20 @@ else if (_vehicle is not null && _editing)
         public string? SellerPhone { get; set; }
         public string? SellerEmail { get; set; }
         public string? PickupDriver { get; set; }
+        public string? PaymentMethod { get; set; }
         public int VehicleSourceId { get; set; }
         public DateTime AcquiredAt { get; set; }
+    }
+
+    private async Task GenerateInvoiceAsync()
+    {
+        if (_vehicle is null || _invoiceDialog is null) return;
+        _error = null;
+        await _invoiceDialog.OpenAsync(_vehicle.Id);
+    }
+
+    private async Task OnInvoiceClosedAsync()
+    {
+        await LoadAsync();
     }
 }

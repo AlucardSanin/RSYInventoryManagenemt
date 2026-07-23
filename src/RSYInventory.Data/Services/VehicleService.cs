@@ -98,6 +98,7 @@ public class VehicleService
         string? sellerPhone = null,
         string? sellerEmail = null,
         string? pickupDriver = null,
+        string? paymentMethod = null,
         CancellationToken ct = default)
     {
         if (!_currentUser.CanAcquireVehicles && !_currentUser.CanEditInventory)
@@ -131,6 +132,7 @@ public class VehicleService
             SellerPhone = NullIfWhiteSpace(sellerPhone),
             SellerEmail = NullIfWhiteSpace(sellerEmail),
             PickupDriver = NullIfWhiteSpace(pickupDriver),
+            PaymentMethod = NullIfWhiteSpace(paymentMethod),
             VehicleSourceId = vehicleSourceId,
             AcquiredAt = acquiredAt,
             AcquiredByUserId = _currentUser.UserId,
@@ -257,6 +259,7 @@ public class VehicleService
         string? sellerPhone = null,
         string? sellerEmail = null,
         string? pickupDriver = null,
+        string? paymentMethod = null,
         CancellationToken ct = default)
     {
         if (!_currentUser.CanAcquireVehicles && !_currentUser.CanManageUsers)
@@ -297,11 +300,53 @@ public class VehicleService
         vehicle.SellerPhone = NullIfWhiteSpace(sellerPhone);
         vehicle.SellerEmail = NullIfWhiteSpace(sellerEmail);
         vehicle.PickupDriver = NullIfWhiteSpace(pickupDriver);
+        vehicle.PaymentMethod = NullIfWhiteSpace(paymentMethod);
         vehicle.VehicleSourceId = vehicleSourceId;
         vehicle.AcquiredAt = acquiredAt;
         vehicle.UpdatedAtUtc = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>Assigns the next invoice number (from 1000) if the vehicle has none yet.</summary>
+    public async Task<int> EnsureInvoiceNumberAsync(int vehicleId, CancellationToken ct = default)
+    {
+        if (!_currentUser.CanAcquireVehicles && !_currentUser.CanManageUsers && !_currentUser.CanEditInventory)
+            throw new UnauthorizedAccessException("No tiene permiso para generar facturas.");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+
+        var vehicle = await db.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+            ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+        if (vehicle.InvoiceNumber is > 0)
+        {
+            await tx.CommitAsync(ct);
+            return vehicle.InvoiceNumber.Value;
+        }
+
+        // Atomically take the next number from the sequence table.
+        // EF Core maps scalar SqlQuery results to a column named Value.
+        var assigned = await db.Database.SqlQueryRaw<int>(
+                """
+                UPDATE dbo.InvoiceSequence WITH (UPDLOCK, ROWLOCK)
+                SET NextNumber = NextNumber + 1
+                OUTPUT deleted.NextNumber AS [Value]
+                WHERE Id = 1;
+                """)
+            .ToListAsync(ct);
+
+        var number = assigned.FirstOrDefault();
+        if (number <= 0)
+            throw new InvalidOperationException("No se pudo asignar el número de factura. Ejecuta 011_VehicleInvoiceAndPayment.sql.");
+
+        vehicle.InvoiceNumber = number;
+        vehicle.InvoiceIssuedAtUtc = DateTime.UtcNow;
+        vehicle.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return number;
     }
 
     private static string? NullIfWhiteSpace(string? value)

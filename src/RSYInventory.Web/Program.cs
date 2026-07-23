@@ -2,11 +2,18 @@ using RSYInventory.Data;
 using RSYInventory.Data.Services;
 using RSYInventory.Web.Components;
 using RSYInventory.Web.Services;
+using RSYInventory.Web.Services.Invoice;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+
+builder.Services.Configure<Microsoft.AspNetCore.Components.Server.CircuitOptions>(options =>
+{
+    options.DetailedErrors = builder.Environment.IsDevelopment()
+        || builder.Configuration.GetValue<bool>("DetailedErrors");
+});
 
 // ConnectionStrings:YardInventory
 // - Development → instancia local (.\MSSQLSERVER01 / RSYYardInventory)
@@ -20,6 +27,15 @@ builder.Services.AddYardInventoryData(connectionString);
 builder.Services.AddScoped<IUserSessionStore, ProtectedUserSessionStore>();
 builder.Services.AddScoped<UiBusyService>();
 builder.Services.AddSingleton<MediaStorageService>();
+
+builder.Services.Configure<CompanyInvoiceOptions>(
+    builder.Configuration.GetSection(CompanyInvoiceOptions.SectionName));
+builder.Services.Configure<SmtpOptions>(
+    builder.Configuration.GetSection(SmtpOptions.SectionName));
+
+builder.Services.AddSingleton<PurchaseInvoicePdfService>();
+builder.Services.AddScoped<InvoiceEmailService>();
+builder.Services.AddScoped<VehicleInvoiceService>();
 
 var app = builder.Build();
 
