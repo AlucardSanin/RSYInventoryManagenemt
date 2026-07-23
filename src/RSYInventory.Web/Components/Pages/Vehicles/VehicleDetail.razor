@@ -137,7 +137,7 @@ else if (_vehicle is not null && !_editing)
                         <dd>@(string.IsNullOrWhiteSpace(_vehicle.PaymentMethod) ? "—" : _vehicle.PaymentMethod)</dd>
                     </div>
                     <div>
-                        <dt>Factura</dt>
+                        <dt>Recibo de compra</dt>
                         <dd>@(_vehicle.InvoiceNumber is null ? "Sin generar" : $"#{_vehicle.InvoiceNumber}")</dd>
                     </div>
                     <div>
@@ -164,10 +164,10 @@ else if (_vehicle is not null && !_editing)
                 </dl>
 
                 <div class="form-actions mt-3">
-                    @if (CurrentUser.CanAcquireVehicles || CurrentUser.CanManageUsers || CurrentUser.CanEditInventory)
+                    @if (CurrentUser.CanEditVehicles)
                     {
                         <button type="button" class="btn btn-outline-primary" @onclick="GenerateInvoiceAsync" disabled="@Busy.IsBusy">
-                            @(_vehicle.InvoiceNumber is null ? "Generar factura" : $"Ver factura #{_vehicle.InvoiceNumber}")
+                            @(_vehicle.InvoiceNumber is null ? "Generar recibo de compra" : $"Ver recibo #{_vehicle.InvoiceNumber}")
                         </button>
                     }
                     @if (CurrentUser.CanEditInventory || CurrentUser.CanManageZones)
@@ -382,7 +382,7 @@ else if (_vehicle is not null && _editing)
     private string? _info;
     private string? _vinHint;
 
-    private bool CanEdit => CurrentUser.CanAcquireVehicles || CurrentUser.CanManageUsers;
+    private bool CanEdit => CurrentUser.CanEditVehicles;
     private string HeaderTitle => _vehicle is null
         ? "Vehículo"
         : string.IsNullOrWhiteSpace($"{_vehicle.Year} {_vehicle.Make} {_vehicle.Model}".Trim())
@@ -712,6 +712,7 @@ else if (_vehicle is not null && _editing)
                     _edit.PaymentMethod);
 
                 var failed = 0;
+                string? lastImageError = null;
                 foreach (var file in _pendingFiles)
                 {
                     try
@@ -720,9 +721,10 @@ else if (_vehicle is not null && _editing)
                         var path = await Media.SaveAsync(stream, file.Name, "vehicles", Id, _edit.Make);
                         await Vehicles.AddImageAsync(Id, path);
                     }
-                    catch
+                    catch (Exception imgEx)
                     {
                         failed++;
+                        lastImageError = imgEx.Message;
                     }
                 }
 
@@ -730,8 +732,10 @@ else if (_vehicle is not null && _editing)
                 await LoadAsync();
                 if (failed > 0)
                 {
-                    Toasts.Info($"Cambios guardados, pero {failed} foto(s) no se subieron.");
-                    _info = $"Cambios guardados, pero {failed} foto(s) no se subieron.";
+                    var detail = string.IsNullOrWhiteSpace(lastImageError) ? "" : $" ({lastImageError})";
+                    var msg = $"Cambios guardados, pero {failed} foto(s) no se subieron{detail}.";
+                    Toasts.Info(msg);
+                    _info = msg;
                 }
                 else
                 {

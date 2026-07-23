@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.DataProtection;
 using RSYInventory.Data;
 using RSYInventory.Data.Services;
 using RSYInventory.Web.Components;
@@ -14,6 +15,14 @@ builder.Services.Configure<Microsoft.AspNetCore.Components.Server.CircuitOptions
     options.DetailedErrors = builder.Environment.IsDevelopment()
         || builder.Configuration.GetValue<bool>("DetailedErrors");
 });
+
+// Persist keys so antiforgery / protected session survive restarts.
+// Ephemeral keys break InputFile uploads after deploy while Blazor circuits still look "logged in".
+var dataProtectionKeysPath = Path.Combine(builder.Environment.ContentRootPath, "dataprotection-keys");
+Directory.CreateDirectory(dataProtectionKeysPath);
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath))
+    .SetApplicationName("RSYInventory");
 
 // ConnectionStrings:YardInventory
 // - Development → instancia local (.\MSSQLSERVER01 / RSYYardInventory)

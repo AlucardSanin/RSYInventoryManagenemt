@@ -158,7 +158,7 @@ public class VehicleService
 
     public async Task SetImagePathAsync(int vehicleId, string? relativePath, CancellationToken ct = default)
     {
-        if (!_currentUser.CanAcquireVehicles && !_currentUser.CanEditInventory)
+        if (!_currentUser.CanEditVehicles)
             throw new UnauthorizedAccessException("No tiene permiso para actualizar vehículos.");
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -189,8 +189,8 @@ public class VehicleService
     /// <summary>Appends a photo to the vehicle gallery and keeps ImageRelativePath as the cover (first) image.</summary>
     public async Task AddImageAsync(int vehicleId, string relativePath, CancellationToken ct = default)
     {
-        if (!_currentUser.CanAcquireVehicles && !_currentUser.CanEditInventory)
-            throw new UnauthorizedAccessException("No tiene permiso para actualizar vehículos.");
+        if (!_currentUser.CanEditVehicles)
+            throw new UnauthorizedAccessException("No tiene permiso para agregar fotos al vehículo.");
 
         if (string.IsNullOrWhiteSpace(relativePath))
             throw new InvalidOperationException("Ruta de imagen inválida.");
@@ -227,8 +227,8 @@ public class VehicleService
     /// <summary>Removes one gallery photo. Cover falls back to the next remaining image.</summary>
     public async Task RemoveImageAsync(int vehicleId, int imageId, CancellationToken ct = default)
     {
-        if (!_currentUser.CanAcquireVehicles && !_currentUser.CanManageUsers)
-            throw new UnauthorizedAccessException("No tiene permiso para editar vehículos.");
+        if (!_currentUser.CanEditVehicles)
+            throw new UnauthorizedAccessException("No tiene permiso para eliminar fotos del vehículo.");
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var vehicle = await db.Vehicles
@@ -346,7 +346,7 @@ public class VehicleService
         string? paymentMethod = null,
         CancellationToken ct = default)
     {
-        if (!_currentUser.CanAcquireVehicles && !_currentUser.CanManageUsers)
+        if (!_currentUser.CanEditVehicles)
             throw new UnauthorizedAccessException("No tiene permiso para editar vehículos.");
 
         vin = vin.Trim().ToUpperInvariant();
@@ -395,8 +395,8 @@ public class VehicleService
     /// <summary>Assigns the next invoice number (from 1000) if the vehicle has none yet.</summary>
     public async Task<int> EnsureInvoiceNumberAsync(int vehicleId, CancellationToken ct = default)
     {
-        if (!_currentUser.CanAcquireVehicles && !_currentUser.CanManageUsers && !_currentUser.CanEditInventory)
-            throw new UnauthorizedAccessException("No tiene permiso para generar facturas.");
+        if (!_currentUser.CanEditVehicles)
+            throw new UnauthorizedAccessException("No tiene permiso para generar recibos de compra.");
 
         await using var strategyDb = await _dbFactory.CreateDbContextAsync(ct);
         var strategy = strategyDb.Database.CreateExecutionStrategy();

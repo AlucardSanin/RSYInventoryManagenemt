@@ -567,6 +567,7 @@
                 if (_imageFiles.Count > 0)
                 {
                     var failed = 0;
+                    string? lastImageError = null;
                     foreach (var file in _imageFiles)
                     {
                         try
@@ -575,14 +576,18 @@
                             var path = await Media.SaveAsync(stream, file.Name, "vehicles", created.Id, _model.Make);
                             await Vehicles.AddImageAsync(created.Id, path);
                         }
-                        catch
+                        catch (Exception imgEx)
                         {
                             failed++;
+                            lastImageError = imgEx.Message;
                         }
                     }
 
                     if (failed > 0)
-                        Toasts.Info($"Vehículo guardado, pero {failed} foto(s) no se pudieron subir.");
+                    {
+                        var detail = string.IsNullOrWhiteSpace(lastImageError) ? "" : $" ({lastImageError})";
+                        Toasts.Info($"Vehículo guardado, pero {failed} foto(s) no se pudieron subir{detail}.");
+                    }
                     else
                         Toasts.Success("Vehículo registrado.");
                 }

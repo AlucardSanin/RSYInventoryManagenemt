@@ -8,10 +8,16 @@ using RSYInventory.Data.Entities;
 
 namespace RSYInventory.Web.Services.Invoice;
 
+/// <summary>
+/// Generates a Vehicle Purchase Acknowledgement / sales receipt.
+/// RSY is the buyer; the individual is the seller (not a customer invoice).
+/// Designed to fit on a single Letter page.
+/// </summary>
 public sealed class PurchaseInvoicePdfService
 {
     private static readonly CultureInfo Us = CultureInfo.GetCultureInfo("en-US");
     private static readonly string HeaderGrey = "#E6E6E8";
+    private static readonly string Muted = "#4B5563";
 
     private readonly CompanyInvoiceOptions _company;
     private readonly IWebHostEnvironment _env;
@@ -27,34 +33,37 @@ public sealed class PurchaseInvoicePdfService
         _env = env;
     }
 
-    public PurchaseInvoiceModel BuildModel(Vehicle vehicle, int invoiceNumber)
+    public PurchaseInvoiceModel BuildModel(Vehicle vehicle, int documentNumber)
     {
-        var yearMakeModel = string.Join(' ', new[]
+        var description = string.Join(' ', new[]
         {
             vehicle.Year?.ToString(Us),
             vehicle.Make,
             vehicle.Model
         }.Where(s => !string.IsNullOrWhiteSpace(s)));
 
-        if (string.IsNullOrWhiteSpace(yearMakeModel))
-            yearMakeModel = "Vehicle purchase";
+        if (string.IsNullOrWhiteSpace(description))
+            description = "Vehicle";
 
         return new PurchaseInvoiceModel
         {
-            InvoiceNumber = invoiceNumber,
-            InvoiceDate = vehicle.AcquiredAt.Date,
+            DocumentNumber = documentNumber,
+            PurchaseDate = vehicle.AcquiredAt.Date,
             PaymentMethod = vehicle.PaymentMethod,
-            CompanyName = _company.Name,
-            CompanyAddressLine1 = _company.AddressLine1,
-            CompanyCityStateZip = _company.CityStateZip,
-            CompanyEmail = _company.Email,
-            BilledToName = vehicle.SellerName,
-            BilledToPhone = vehicle.SellerPhone,
-            BilledToEmail = vehicle.SellerEmail,
-            BilledToLocation = vehicle.AcquisitionLocation,
-            ItemDescription = yearMakeModel,
-            ItemVin = vehicle.Vin,
-            Amount = vehicle.PurchasePrice ?? 0m
+            BuyerName = _company.Name,
+            BuyerAddressLine1 = _company.AddressLine1,
+            BuyerCityStateZip = _company.CityStateZip,
+            BuyerEmail = _company.Email,
+            SellerName = vehicle.SellerName,
+            SellerPhone = vehicle.SellerPhone,
+            SellerEmail = vehicle.SellerEmail,
+            SellerAddress = vehicle.AcquisitionLocation,
+            VehicleYear = vehicle.Year,
+            VehicleMake = vehicle.Make,
+            VehicleModel = vehicle.Model,
+            VehicleVin = vehicle.Vin,
+            VehicleDescription = description,
+            PurchasePrice = vehicle.PurchasePrice ?? 0m
         };
     }
 
@@ -62,132 +71,172 @@ public sealed class PurchaseInvoicePdfService
     {
         var logoPath = Path.Combine(_env.WebRootPath, "invoice", "rsy-invoice-logo.png");
         var footerPath = Path.Combine(_env.WebRootPath, "invoice", "rsy-invoice-footer.png");
-        var money = model.Amount.ToString("C0", Us);
+        var money = model.PurchasePrice.ToString("C", Us);
 
         var document = Document.Create(container =>
         {
             container.Page(page =>
             {
                 page.Size(PageSizes.Letter);
-                page.MarginLeft(56);
-                page.MarginRight(56);
-                page.MarginTop(36);
+                page.MarginLeft(44);
+                page.MarginRight(44);
+                page.MarginTop(24);
                 page.MarginBottom(0);
-                page.DefaultTextStyle(x => x.FontSize(10).FontColor(Colors.Black).FontFamily(Fonts.Arial));
+                page.DefaultTextStyle(x => x.FontSize(9.5f).FontColor(Colors.Black).FontFamily(Fonts.Arial));
                 page.PageColor(Colors.White);
 
                 page.Content().Column(col =>
                 {
+                    // Header: logo + document number (stays on page 1)
                     col.Item().Row(row =>
                     {
                         row.RelativeItem().Element(c =>
                         {
                             if (File.Exists(logoPath))
-                                c.Height(58).Width(150).Image(logoPath).FitArea();
+                                c.Height(64).Width(168).Image(logoPath).FitArea();
                             else
                                 c.Text("RODRÍGUEZ SALVAGE YARD").Bold().FontSize(14);
                         });
 
-                        row.ConstantItem(140).AlignRight().AlignMiddle()
-                            .Text($"NO. {model.InvoiceNumber:000000}")
-                            .Bold().FontSize(14);
+                        row.ConstantItem(150).AlignRight().AlignMiddle()
+                            .Text($"NO. {model.DocumentNumber:000000}")
+                            .Bold().FontSize(13);
                     });
 
-                    col.Item().PaddingTop(28).Text("INVOICE").Bold().FontSize(34).FontColor(Colors.Black);
-
-                    col.Item().PaddingTop(18)
-                        .Text(text =>
-                        {
-                            text.Span("Date: ").Bold();
-                            text.Span(model.InvoiceDate.ToString("MMMM d, yyyy", Us));
-                        });
-
-                    col.Item().PaddingTop(18).Row(row =>
+                    // One flexible region: center the body in leftover space (do NOT use two ExtendVertical).
+                    col.Item().ExtendVertical().AlignMiddle().Column(body =>
                     {
-                        row.RelativeItem().Column(from =>
+                        body.Item().Text("VEHICLE PURCHASE ACKNOWLEDGEMENT")
+                            .Bold().FontSize(15).FontColor(Colors.Black);
+
+                        body.Item().PaddingTop(2).Text("Bill of sale / ownership transfer receipt")
+                            .FontSize(8).FontColor(Muted);
+
+                        body.Item().PaddingTop(8)
+                            .Text(text =>
+                            {
+                                text.Span("Purchase date: ").Bold();
+                                text.Span(model.PurchaseDate.ToString("MMMM d, yyyy", Us));
+                            });
+
+                        body.Item().PaddingTop(10).Element(c => SectionTitle(c, "Vehicle"));
+                        body.Item().PaddingTop(4).Text(text =>
                         {
-                            from.Item().Text("From:").Bold();
-                            from.Item().PaddingTop(6).Text(model.CompanyName);
-                            from.Item().Text(model.CompanyAddressLine1);
-                            from.Item().Text(model.CompanyCityStateZip);
-                            from.Item().Text(model.CompanyEmail);
+                            text.Span("Y/M/M: ").FontColor(Muted);
+                            text.Span($"{Blank(model.VehicleYear?.ToString(Us))} / {Blank(model.VehicleMake)} / {Blank(model.VehicleModel)}");
+                            text.Span("    VIN: ").FontColor(Muted);
+                            text.Span(Blank(model.VehicleVin)).SemiBold();
                         });
 
-                        row.RelativeItem().Column(billed =>
+                        body.Item().PaddingTop(10).Row(row =>
                         {
-                            billed.Item().Text("Billed to").Bold();
-                            billed.Item().PaddingTop(6).Text(
-                                string.IsNullOrWhiteSpace(model.BilledToName) ? "—" : model.BilledToName!);
+                            row.RelativeItem().PaddingRight(8).Column(seller =>
+                            {
+                                seller.Item().Element(c => SectionTitle(c, "Seller"));
+                                seller.Item().PaddingTop(4).Text(Blank(model.SellerName)).SemiBold();
+                                foreach (var line in SplitLines(model.SellerAddress))
+                                    seller.Item().Text(line).FontSize(8.5f);
+                                if (!string.IsNullOrWhiteSpace(model.SellerPhone))
+                                    seller.Item().Text(model.SellerPhone!).FontSize(8.5f);
+                                if (!string.IsNullOrWhiteSpace(model.SellerEmail))
+                                    seller.Item().Text(model.SellerEmail!).FontSize(8.5f);
+                            });
 
-                            foreach (var line in SplitAddressLines(model.BilledToLocation))
-                                billed.Item().Text(line);
+                            row.RelativeItem().PaddingLeft(8).Column(buyer =>
+                            {
+                                buyer.Item().Element(c => SectionTitle(c, "Buyer"));
+                                buyer.Item().PaddingTop(4).Text(model.BuyerName).SemiBold();
+                                buyer.Item().Text(model.BuyerAddressLine1).FontSize(8.5f);
+                                buyer.Item().Text(model.BuyerCityStateZip).FontSize(8.5f);
+                                buyer.Item().Text(model.BuyerEmail).FontSize(8.5f);
+                            });
+                        });
 
-                            if (!string.IsNullOrWhiteSpace(model.BilledToEmail))
-                                billed.Item().Text(model.BilledToEmail!);
+                        body.Item().PaddingTop(10).Element(c => SectionTitle(c, "Transaction"));
+                        body.Item().PaddingTop(4).Table(table =>
+                        {
+                            table.ColumnsDefinition(columns =>
+                            {
+                                columns.RelativeColumn(3.5f);
+                                columns.RelativeColumn(1.2f);
+                                columns.RelativeColumn(1.2f);
+                            });
+
+                            table.Header(header =>
+                            {
+                                header.Cell().Element(TableHeaderCell).Text("Description");
+                                header.Cell().Element(TableHeaderCell).AlignRight().Text("Price");
+                                header.Cell().Element(TableHeaderCell).AlignRight().Text("Amount");
+                            });
+
+                            table.Cell().Element(TableBodyCell).Text($"Purchase of {model.VehicleDescription}");
+                            table.Cell().Element(TableBodyCell).AlignRight().Text(money);
+                            table.Cell().Element(TableBodyCell).AlignRight().Text(money);
+                        });
+
+                        body.Item().PaddingTop(2).LineHorizontal(1).LineColor(Colors.Black);
+                        body.Item().PaddingTop(4).Row(row =>
+                        {
+                            row.RelativeItem();
+                            row.ConstantItem(90).AlignRight().Text("Sale price").Bold();
+                            row.ConstantItem(80).AlignRight().Text(money).Bold();
+                        });
+                        body.Item().PaddingTop(2).LineHorizontal(1).LineColor(Colors.Black);
+
+                        body.Item().PaddingTop(6)
+                            .Text(text =>
+                            {
+                                text.Span("Payment method: ").Bold();
+                                text.Span(Blank(model.PaymentMethod));
+                            });
+
+                        body.Item().PaddingTop(10).Element(c => SectionTitle(c, "Condition"));
+                        body.Item().PaddingTop(4).Text(text =>
+                        {
+                            text.DefaultTextStyle(x => x.FontSize(8.5f));
+                            text.Span("AS-IS. ").Bold();
+                            text.Span(
+                                "Seller certifies legal ownership and transfers the vehicle to Buyer with no warranties. " +
+                                "Buyer acknowledges receipt of ownership and possession on the purchase date above.");
+                        });
+
+                        body.Item().PaddingTop(14).Row(row =>
+                        {
+                            row.RelativeItem().PaddingRight(14).Column(sig =>
+                            {
+                                sig.Item().Text("Seller signature").Bold().FontSize(9);
+                                sig.Item().PaddingTop(18).LineHorizontal(1).LineColor(Colors.Black);
+                                sig.Item().PaddingTop(2).Text("Signature").FontSize(7.5f).FontColor(Muted);
+                                sig.Item().PaddingTop(12).LineHorizontal(1).LineColor(Colors.Black);
+                                sig.Item().PaddingTop(2).Text("Printed name").FontSize(7.5f).FontColor(Muted);
+                                sig.Item().PaddingTop(12).LineHorizontal(1).LineColor(Colors.Black);
+                                sig.Item().PaddingTop(2).Text("Date").FontSize(7.5f).FontColor(Muted);
+                            });
+
+                            row.RelativeItem().PaddingLeft(14).Column(sig =>
+                            {
+                                sig.Item().Text("Buyer (authorized)").Bold().FontSize(9);
+                                sig.Item().PaddingTop(18).LineHorizontal(1).LineColor(Colors.Black);
+                                sig.Item().PaddingTop(2).Text("Signature").FontSize(7.5f).FontColor(Muted);
+                                sig.Item().PaddingTop(12).LineHorizontal(1).LineColor(Colors.Black);
+                                sig.Item().PaddingTop(2).Text("Printed name").FontSize(7.5f).FontColor(Muted);
+                                sig.Item().PaddingTop(12).LineHorizontal(1).LineColor(Colors.Black);
+                                sig.Item().PaddingTop(2).Text("Date").FontSize(7.5f).FontColor(Muted);
+                            });
                         });
                     });
-
-                    col.Item().PaddingTop(28).Table(table =>
-                    {
-                        table.ColumnsDefinition(columns =>
-                        {
-                            columns.RelativeColumn(4.2f);
-                            columns.RelativeColumn(1.1f);
-                            columns.RelativeColumn(1.1f);
-                        });
-
-                        table.Header(header =>
-                        {
-                            header.Cell().Element(TableHeaderCell).Text("Item");
-                            header.Cell().Element(TableHeaderCell).AlignRight().Text("Price");
-                            header.Cell().Element(TableHeaderCell).AlignRight().Text("Amount");
-                        });
-
-                        table.Cell().Element(TableBodyCell).Text(model.ItemDescription);
-                        table.Cell().Element(TableBodyCell).AlignRight().Text(money);
-                        table.Cell().Element(TableBodyCell).AlignRight().Text(money);
-                    });
-
-                    col.Item().PaddingTop(4).LineHorizontal(1).LineColor(Colors.Black);
-
-                    col.Item().PaddingTop(10).Table(table =>
-                    {
-                        table.ColumnsDefinition(columns =>
-                        {
-                            columns.RelativeColumn(4.2f);
-                            columns.RelativeColumn(1.1f);
-                            columns.RelativeColumn(1.1f);
-                        });
-
-                        table.Cell().PaddingHorizontal(10);
-                        table.Cell().PaddingHorizontal(10).AlignRight().Text("Total").Bold().FontSize(11);
-                        table.Cell().PaddingHorizontal(10).AlignRight().Text(money).Bold().FontSize(11);
-                    });
-
-                    col.Item().PaddingTop(4).LineHorizontal(1).LineColor(Colors.Black);
-
-                    col.Item().PaddingTop(22)
-                        .Text(text =>
-                        {
-                            text.Span("Payment method: ").Bold();
-                            text.Span(string.IsNullOrWhiteSpace(model.PaymentMethod) ? "—" : model.PaymentMethod);
-                        });
-
-                    col.Item().PaddingTop(10)
-                        .Text(text =>
-                        {
-                            text.Span("Note: ").Bold();
-                            text.Span("Thank you for choosing us!");
-                        });
                 });
 
-                // Full-bleed footer: FitWidth spans the page; FitArea left a white gap on the right.
-                page.Footer().Height(168).PaddingHorizontal(-56).Element(footer =>
+                // Full-bleed footer on the page background (outside content margins).
+                var pageWidth = PageSizes.Letter.Width;
+                var footerHeight = pageWidth * (456f / 1836f);
+                page.MarginBottom(footerHeight);
+                page.Background().AlignBottom().Height(footerHeight).Element(footer =>
                 {
                     if (File.Exists(footerPath))
-                        footer.Width(PageSizes.Letter.Width).Image(footerPath).FitWidth();
+                        footer.Image(footerPath).FitWidth();
                     else
-                        footer.Height(168).Background("#1F424C");
+                        footer.Background("#1F424C");
                 });
             });
         });
@@ -195,26 +244,33 @@ public sealed class PurchaseInvoicePdfService
         return document.GeneratePdf();
     }
 
-    public byte[] GeneratePdf(Vehicle vehicle, int invoiceNumber)
-        => GeneratePdf(BuildModel(vehicle, invoiceNumber));
+    public byte[] GeneratePdf(Vehicle vehicle, int documentNumber)
+        => GeneratePdf(BuildModel(vehicle, documentNumber));
 
-    private static IEnumerable<string> SplitAddressLines(string? location)
+    private static void SectionTitle(IContainer container, string title)
+        => container.Background(HeaderGrey).PaddingVertical(4).PaddingHorizontal(8)
+            .Text(title).Bold().FontSize(9);
+
+    private static string Blank(string? value)
+        => string.IsNullOrWhiteSpace(value) ? "—" : value.Trim();
+
+    private static IEnumerable<string> SplitLines(string? value)
     {
-        if (string.IsNullOrWhiteSpace(location))
+        if (string.IsNullOrWhiteSpace(value))
             yield break;
 
-        foreach (var line in location.Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var line in value.Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             yield return line;
     }
 
     private static IContainer TableHeaderCell(IContainer c) =>
         c.Background(HeaderGrey)
-            .PaddingVertical(8)
-            .PaddingHorizontal(10)
-            .DefaultTextStyle(x => x.Bold().FontColor(Colors.Black));
+            .PaddingVertical(5)
+            .PaddingHorizontal(6)
+            .DefaultTextStyle(x => x.Bold().FontSize(9).FontColor(Colors.Black));
 
     private static IContainer TableBodyCell(IContainer c) =>
-        c.PaddingVertical(12)
-            .PaddingHorizontal(10)
+        c.PaddingVertical(6)
+            .PaddingHorizontal(6)
             .DefaultTextStyle(x => x.FontColor(Colors.Black));
 }

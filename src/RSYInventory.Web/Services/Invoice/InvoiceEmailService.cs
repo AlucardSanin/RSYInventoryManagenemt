@@ -34,21 +34,23 @@ public sealed class InvoiceEmailService
                 "El correo no está configurado. Completa la sección Smtp en appsettings o User Secrets.");
 
         if (string.IsNullOrWhiteSpace(toEmail))
-            throw new InvalidOperationException("No hay correo del vendedor para enviar la factura.");
+            throw new InvalidOperationException("No hay correo del vendedor para enviar el recibo de compra.");
 
         var message = new MimeMessage();
         message.From.Add(new MailboxAddress(_options.FromDisplayName, _options.FromEmail));
         message.To.Add(new MailboxAddress(
             string.IsNullOrWhiteSpace(toName) ? toEmail.Trim() : toName.Trim(),
             toEmail.Trim()));
-        message.Subject = $"Invoice #{invoiceNumber} — Rodriguez Salvage Yard";
+        message.Subject = $"Vehicle Purchase Acknowledgement #{invoiceNumber} — Rodriguez Salvage Yard";
 
         var body = new TextPart("plain")
         {
             Text = $"""
                 Hello{(string.IsNullOrWhiteSpace(toName) ? "" : $" {toName.Trim()}")},
 
-                Attached is invoice #{invoiceNumber} from Rodriguez Salvage Yard, CORP.
+                Attached is Vehicle Purchase Acknowledgement #{invoiceNumber} for the vehicle you sold to Rodriguez Salvage Yard, CORP.
+
+                Please review, sign, and keep a copy for your records.
 
                 Thank you,
                 Rodriguez Salvage Yard

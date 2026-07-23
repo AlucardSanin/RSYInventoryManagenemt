@@ -43,7 +43,7 @@ else
                 <label class="form-label" for="veh-search">Búsqueda rápida</label>
                 <input id="veh-search"
                        class="form-control"
-                       placeholder="VIN, factura, marca, modelo, año, fuente…"
+                       placeholder="VIN, recib, marca, modelo, año, fuente…"
                        @bind="_search"
                        @bind:event="oninput" />
             </div>
@@ -65,7 +65,7 @@ else
     {
         <div class="page-panel empty-state">
             <p class="empty-state__title">Sin resultados</p>
-            <p class="mb-0">Prueba otro VIN, número de factura, marca o ubicación.</p>
+            <p class="mb-0">Prueba otro VIN, número de recibo, marca o ubicación.</p>
         </div>
     }
     else
@@ -76,7 +76,7 @@ else
                     <tr>
                         <th></th>
                         <th>VIN</th>
-                        <th>Factura</th>
+                        <th>Recibo</th>
                         <th>Año</th>
                         <th>Marca / Modelo</th>
                         <th>Millas</th>

@@ -16,6 +16,10 @@ public interface ICurrentUserService
     bool CanEditInventory { get; }
     bool CanManageZones { get; }
     bool CanAcquireVehicles { get; }
+
+    /// <summary>Edit vehicle details, photos, and purchase receipts (acquirer or admin).</summary>
+    bool CanEditVehicles { get; }
+
     /// <summary>God user: create/edit users and assign access levels.</summary>
     bool CanManageUsers { get; }
 }

@@ -13,8 +13,8 @@
         <div class="invoice-dialog__panel" @onclick:stopPropagation="true">
             <div class="invoice-dialog__header">
                 <div>
-                    <h2 id="invoice-dialog-title" class="invoice-dialog__title">Factura #@_result.Model.InvoiceNumber</h2>
-                    <p class="invoice-dialog__lead">Revisa el PDF antes de enviarlo al vendedor.</p>
+                    <h2 id="invoice-dialog-title" class="invoice-dialog__title">Recibo de compra #@_result.Model.DocumentNumber</h2>
+                    <p class="invoice-dialog__lead">Revisa el acuse de compra (RSY es el comprador) antes de enviarlo al vendedor.</p>
                 </div>
                 <button type="button" class="btn-close" aria-label="Cerrar" @onclick="Close"></button>
             </div>
@@ -32,7 +32,7 @@
                 <object class="invoice-dialog__frame"
                         data="@PdfDataUrl"
                         type="application/pdf"
-                        title="Vista previa de factura">
+                        title="Vista previa del recibo de compra">
                     <p class="mb-2">Tu navegador no puede mostrar el PDF aquí.</p>
                     <a class="btn btn-outline-primary" href="@PdfDataUrl" download="@_result.FileName">Descargar PDF</a>
                 </object>
@@ -103,7 +103,7 @@
                 return "No hay correo del vendedor en este vehículo.";
             if (!Invoices.CanEmail)
                 return "SMTP no está configurado.";
-            return "Enviar factura por correo";
+            return "Enviar recibo por correo";
         }
     }
 
@@ -119,7 +119,7 @@
             await Busy.RunAsync(async () =>
             {
                 _result = await Invoices.GenerateAsync(vehicleId);
-            }, "Generando factura…");
+            }, "Generando recibo de compra…");
         }
         catch (Exception ex)
         {
@@ -139,7 +139,7 @@
         try
         {
             await Invoices.SendEmailAsync(_result);
-            _info = $"Factura enviada a {_result.Vehicle.SellerEmail}.";
+            _info = $"Recibo enviado a {_result.Vehicle.SellerEmail}.";
             Toasts.Success(_info);
         }
         catch (Exception ex)

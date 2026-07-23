@@ -33,7 +33,7 @@ public sealed class VehicleInvoiceService
 
         var model = _pdf.BuildModel(vehicle, invoiceNumber);
         var pdfBytes = _pdf.GeneratePdf(model);
-        var fileName = $"Invoice-{invoiceNumber}.pdf";
+        var fileName = $"Purchase-Acknowledgement-{invoiceNumber}.pdf";
 
         return new VehicleInvoiceResult(vehicle, model, pdfBytes, fileName);
     }
@@ -42,7 +42,7 @@ public sealed class VehicleInvoiceService
         => _email.SendInvoiceAsync(
             invoice.Vehicle.SellerEmail ?? string.Empty,
             invoice.Vehicle.SellerName,
-            invoice.Model.InvoiceNumber,
+            invoice.Model.DocumentNumber,
             invoice.PdfBytes,
             invoice.FileName,
             ct);
