@@ -163,6 +163,48 @@ public sealed class InvoiceTemplateService
         await db.SaveChangesAsync(ct);
     }
 
+    public async Task SetDocuSealTemplateIdAsync(int id, int? docuSealTemplateId, CancellationToken ct = default)
+    {
+        EnsureAdmin();
+        if (docuSealTemplateId is <= 0)
+            docuSealTemplateId = null;
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var target = await db.InvoiceTemplates.FirstOrDefaultAsync(t => t.Id == id, ct)
+            ?? throw new InvalidOperationException("Plantilla no encontrada.");
+
+        target.DocuSealTemplateId = docuSealTemplateId;
+        target.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Picks the branding template that matches the vehicle source (e.g. Saul Motors),
+    /// otherwise the default / first active template.
+    /// </summary>
+    public async Task<InvoiceTemplate?> SuggestForVehicleSourceAsync(
+        string? vehicleSourceName,
+        CancellationToken ct = default)
+    {
+        var templates = await ListActiveAsync(ct);
+        if (templates.Count == 0)
+            return null;
+
+        if (!string.IsNullOrWhiteSpace(vehicleSourceName))
+        {
+            var source = vehicleSourceName.Trim();
+            var matched = templates.FirstOrDefault(t =>
+                (!string.IsNullOrWhiteSpace(t.MatchedSourceName)
+                 && t.MatchedSourceName.Equals(source, StringComparison.OrdinalIgnoreCase))
+                || t.Name.Equals(source, StringComparison.OrdinalIgnoreCase));
+
+            if (matched is not null)
+                return matched;
+        }
+
+        return templates.FirstOrDefault(t => t.IsDefault) ?? templates[0];
+    }
+
     private void EnsureAdmin()
     {
         if (!_currentUser.CanManageUsers)

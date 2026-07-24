@@ -30,6 +30,12 @@ public partial class InvoiceTemplate
 
     public string? LogoRelativePath { get; set; }
 
+    /// <summary>When set, creating a receipt for a vehicle from this source auto-selects this template.</summary>
+    public string? MatchedSourceName { get; set; }
+
+    /// <summary>DocuSeal template id for this branding (free OSS uses one uploaded PDF per brand).</summary>
+    public int? DocuSealTemplateId { get; set; }
+
     public bool IsDefault { get; set; }
 
     public bool IsActive { get; set; } = true;

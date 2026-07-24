@@ -2,10 +2,8 @@
 @inject InvoiceTemplateService Templates
 @inject VehicleInvoiceService Invoices
 @inject ICurrentUserService CurrentUser
-@inject MediaStorageService Media
 @inject UiBusyService Busy
 @inject ToastService Toasts
-@using Microsoft.AspNetCore.Components.Forms
 @using RSYInventory.Data.Entities
 @using RSYInventory.Web.Services.Invoice
 
@@ -32,27 +30,15 @@ else
 
     <div class="page-panel mb-3">
         <h2 class="page-panel__title">DocuSeal (firma electrónica)</h2>
-        <div class="alert alert-warning mb-3">
-            Si en la firma ves texto como <code>{{{{VIN;type=text...}}}}</code>, la plantilla está mal:
-            esos tags no se convirtieron en campos. Hay que crear una <strong>plantilla nueva</strong> subiendo el DOCX
-            (no sirve solo reemplazar el PDF viejo).
-        </div>
-        <ol class="mb-3">
-            <li>Descarga el DOCX maestro abajo.</li>
-            <li>En DocuSeal → <strong>New Template</strong> → sube el <code>.docx</code>.</li>
-            <li>Verifica que aparezcan cajas de campos (VIN, SellerName, firma…), no llaves <code>{{{{}}}}</code>.</li>
-            <li>El rol del firmante debe ser <code>Seller</code> (igual que <code>DocuSeal:SellerRole</code>).</li>
-            <li>Copia el ID de la plantilla a <code>DocuSeal:TemplateId</code> y reinicia la app.</li>
-        </ol>
-        <button type="button" class="btn btn-outline-primary" disabled="@_busy" @onclick="DownloadDocuSealMasterAsync">
-            @(_busyDocuSeal ? "Generando…" : "Descargar DOCX maestro para DocuSeal")
-        </button>
-        @if (!string.IsNullOrEmpty(_docuSealDownloadUrl))
-        {
-            <a class="btn btn-link" href="@_docuSealDownloadUrl" download="docuseal-receipt-master.docx">
-                Guardar archivo…
-            </a>
-        }
+        <p class="mb-2">
+            Por cada marca (RSY / Saul Motors) descarga el PDF vacío + la guía, súbelos a DocuSeal
+            como plantillas distintas y guarda el ID de DocuSeal en la fila de abajo.
+            Los números de recibo son <strong>compartidos</strong> (misma secuencia).
+        </p>
+        <p class="text-muted small mb-0">
+            Ejecuta <code>014_SaulMotorsSourceAndTemplate.sql</code> si aún no agregaste la fuente y plantilla Saul Motors.
+            Logo: <code>wwwroot/invoice/saul-motors-logo.png</code>.
+        </p>
     </div>
 
     <div class="page-panel mb-3">
@@ -119,7 +105,8 @@ else
                             <th>Nombre</th>
                             <th>Comprador</th>
                             <th>Firma</th>
-                            <th>PDF</th>
+                            <th>DocuSeal</th>
+                            <th>PDF vacío / guía</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -137,21 +124,52 @@ else
                                     {
                                         <span class="badge text-bg-light ms-1">Inactiva</span>
                                     }
+                                    @if (!string.IsNullOrWhiteSpace(t.MatchedSourceName))
+                                    {
+                                        <div class="small text-muted">Fuente → @t.MatchedSourceName</div>
+                                    }
                                 </td>
                                 <td>@t.BuyerCompanyName</td>
                                 <td><code>@t.BuyerAuthorizedName</code></td>
-                                <td>
-                                    @if (string.IsNullOrWhiteSpace(t.PdfRelativePath))
+                                <td style="min-width: 9rem;">
+                                    <div class="input-group input-group-sm">
+                                        <input type="number"
+                                               class="form-control"
+                                               min="1"
+                                               placeholder="ID"
+                                               value="@(t.DocuSealTemplateId?.ToString() ?? "")"
+                                               @onchange="e => OnDocuSealIdChanged(t.Id, e.Value?.ToString())" />
+                                        <button type="button"
+                                                class="btn btn-outline-secondary"
+                                                disabled="@_busy"
+                                                @onclick="@(() => SaveDocuSealIdAsync(t.Id))">
+                                            OK
+                                        </button>
+                                    </div>
+                                </td>
+                                <td class="text-nowrap">
+                                    <button type="button" class="btn btn-sm btn-primary me-1" disabled="@_busy"
+                                            @onclick="@(() => DownloadBlankAsync(t))">
+                                        Vacío
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_busy"
+                                            @onclick="@(() => DownloadGuideAsync(t))">
+                                        Guía
+                                    </button>
+                                    @if (_downloadLinks.TryGetValue(t.Id, out var links))
                                     {
-                                        <span class="text-muted">Layout estándar</span>
+                                        <div class="small mt-1">
+                                            @if (!string.IsNullOrEmpty(links.BlankUrl))
+                                            {
+                                                <a href="@links.BlankUrl" download="@($"docuseal-{Slug(t.Name)}-blank.pdf")">vacío</a>
+                                            }
+                                            @if (!string.IsNullOrEmpty(links.GuideUrl))
+                                            {
+                                                <span> · </span>
+                                                <a href="@links.GuideUrl" download="@($"docuseal-{Slug(t.Name)}-guide.pdf")">guía</a>
+                                            }
+                                        </div>
                                     }
-                                    else
-                                    {
-                                        <span>Adjunto</span>
-                                    }
-                                    <InputFile class="form-control form-control-sm mt-1"
-                                               OnChange="e => OnPdfSelected(e, t.Id)"
-                                               accept=".pdf,application/pdf" />
                                 </td>
                                 <td class="text-nowrap">
                                     @if (!t.IsDefault && t.IsActive)
@@ -182,7 +200,8 @@ else
                 </table>
             </div>
             <p class="text-muted small mt-3 mb-0">
-                El PDF adjunto se guarda para uso futuro (DocuSeal / layout custom). Por ahora el recibo generado usa el layout estándar con los datos de la plantilla.
+                Sube el PDF vacío a DocuSeal, coloca los campos según la guía (rol <code>Seller</code>),
+                y guarda el ID de esa plantilla DocuSeal en la columna DocuSeal.
             </p>
         }
     </div>
@@ -191,10 +210,10 @@ else
 @code {
     private bool _ready;
     private bool _busy;
-    private bool _busyDocuSeal;
     private string? _error;
-    private string? _docuSealDownloadUrl;
     private IReadOnlyList<InvoiceTemplate>? _items;
+    private readonly Dictionary<int, int?> _docuSealIdEdits = new();
+    private readonly Dictionary<int, (string? BlankUrl, string? GuideUrl)> _downloadLinks = new();
 
     private string _name = "";
     private string _company = "";
@@ -212,16 +231,32 @@ else
             await ReloadAsync();
     }
 
-    private async Task DownloadDocuSealMasterAsync()
+    private static string Slug(string name)
+        => new string(name.Trim().ToLowerInvariant()
+            .Select(ch => char.IsLetterOrDigit(ch) ? ch : '-')
+            .ToArray());
+
+    private void OnDocuSealIdChanged(int templateId, string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            _docuSealIdEdits[templateId] = null;
+        else if (int.TryParse(raw, out var id))
+            _docuSealIdEdits[templateId] = id;
+    }
+
+    private async Task SaveDocuSealIdAsync(int templateId)
     {
         if (_busy) return;
-        _busy = _busyDocuSeal = true;
+        _busy = true;
         _error = null;
         try
         {
-            var bytes = Invoices.GetDocuSealMasterTemplateDocx();
-            _docuSealDownloadUrl = $"data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{Convert.ToBase64String(bytes)}";
-            Toasts.Success("DOCX maestro listo. Créalo como plantilla NUEVA en DocuSeal (no reutilices la vieja).");
+            var value = _docuSealIdEdits.TryGetValue(templateId, out var edited)
+                ? edited
+                : _items?.FirstOrDefault(t => t.Id == templateId)?.DocuSealTemplateId;
+            await Templates.SetDocuSealTemplateIdAsync(templateId, value);
+            Toasts.Success("DocuSeal TemplateId guardado.");
+            await ReloadAsync();
         }
         catch (Exception ex)
         {
@@ -230,7 +265,53 @@ else
         }
         finally
         {
-            _busy = _busyDocuSeal = false;
+            _busy = false;
+        }
+    }
+
+    private async Task DownloadBlankAsync(InvoiceTemplate template)
+    {
+        if (_busy) return;
+        _busy = true;
+        try
+        {
+            var bytes = await Invoices.GetDocuSealBlankTemplatePdfAsync(template.Id);
+            var url = $"data:application/pdf;base64,{Convert.ToBase64String(bytes)}";
+            var prev = _downloadLinks.GetValueOrDefault(template.Id);
+            _downloadLinks[template.Id] = (url, prev.GuideUrl);
+            Toasts.Success($"PDF vacío de {template.Name} listo.");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Toasts.Error(ex.Message);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DownloadGuideAsync(InvoiceTemplate template)
+    {
+        if (_busy) return;
+        _busy = true;
+        try
+        {
+            var bytes = await Invoices.GetDocuSealFieldGuidePdfAsync(template.Id);
+            var url = $"data:application/pdf;base64,{Convert.ToBase64String(bytes)}";
+            var prev = _downloadLinks.GetValueOrDefault(template.Id);
+            _downloadLinks[template.Id] = (prev.BlankUrl, url);
+            Toasts.Success($"PDF guía de {template.Name} listo.");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Toasts.Error(ex.Message);
+        }
+        finally
+        {
+            _busy = false;
         }
     }
 
@@ -300,31 +381,6 @@ else
         try
         {
             await Templates.SetActiveAsync(id, active);
-            await ReloadAsync();
-        }
-        catch (Exception ex)
-        {
-            Toasts.Error(ex.Message);
-        }
-        finally
-        {
-            _busy = false;
-        }
-    }
-
-    private async Task OnPdfSelected(InputFileChangeEventArgs e, int templateId)
-    {
-        if (_busy) return;
-        var file = e.File;
-        if (file is null) return;
-
-        _busy = true;
-        try
-        {
-            await using var stream = file.OpenReadStream(maxAllowedSize: 12 * 1024 * 1024);
-            var path = await Media.SaveDocumentAsync(stream, file.Name, "invoice-templates", templateId);
-            await Templates.AttachPdfAsync(templateId, path);
-            Toasts.Success("PDF adjunto (para uso futuro).");
             await ReloadAsync();
         }
         catch (Exception ex)

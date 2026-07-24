@@ -9,7 +9,6 @@ public sealed class VehicleInvoiceService
     private readonly VehicleService _vehicles;
     private readonly InvoiceTemplateService _templates;
     private readonly PurchaseInvoicePdfService _pdf;
-    private readonly DocuSealMasterTemplateService _docuSealMaster;
     private readonly InvoiceEmailService _email;
     private readonly DocuSealClient _docuSeal;
     private readonly MediaStorageService _media;
@@ -20,7 +19,6 @@ public sealed class VehicleInvoiceService
         VehicleService vehicles,
         InvoiceTemplateService templates,
         PurchaseInvoicePdfService pdf,
-        DocuSealMasterTemplateService docuSealMaster,
         InvoiceEmailService email,
         DocuSealClient docuSeal,
         MediaStorageService media,
@@ -30,7 +28,6 @@ public sealed class VehicleInvoiceService
         _vehicles = vehicles;
         _templates = templates;
         _pdf = pdf;
-        _docuSealMaster = docuSealMaster;
         _email = email;
         _docuSeal = docuSeal;
         _media = media;
@@ -45,8 +42,35 @@ public sealed class VehicleInvoiceService
     public Task<IReadOnlyList<InvoiceTemplate>> ListTemplatesAsync(CancellationToken ct = default)
         => _templates.ListActiveAsync(ct);
 
-    public byte[] GetDocuSealMasterTemplateDocx()
-        => _docuSealMaster.GenerateDocx();
+    public Task<IReadOnlyList<InvoiceTemplate>> ListAllTemplatesAsync(CancellationToken ct = default)
+        => _templates.ListAllAsync(ct);
+
+    public async Task<int?> SuggestTemplateIdAsync(int vehicleId, CancellationToken ct = default)
+    {
+        var vehicle = await _vehicles.GetByIdAsync(vehicleId, ct);
+        var suggested = await _templates.SuggestForVehicleSourceAsync(vehicle?.VehicleSource?.Name, ct);
+        return suggested?.Id;
+    }
+
+    public byte[] GetDocuSealBlankTemplatePdf(InvoiceTemplate? template = null)
+        => _pdf.GenerateDocuSealBlankTemplatePdf(template);
+
+    public byte[] GetDocuSealFieldGuidePdf(InvoiceTemplate? template = null)
+        => _pdf.GenerateDocuSealFieldGuidePdf(template);
+
+    public async Task<byte[]> GetDocuSealBlankTemplatePdfAsync(int templateId, CancellationToken ct = default)
+    {
+        var template = await _templates.GetByIdAnyAsync(templateId, ct)
+            ?? throw new InvalidOperationException("Plantilla no encontrada.");
+        return _pdf.GenerateDocuSealBlankTemplatePdf(template);
+    }
+
+    public async Task<byte[]> GetDocuSealFieldGuidePdfAsync(int templateId, CancellationToken ct = default)
+    {
+        var template = await _templates.GetByIdAnyAsync(templateId, ct)
+            ?? throw new InvalidOperationException("Plantilla no encontrada.");
+        return _pdf.GenerateDocuSealFieldGuidePdf(template);
+    }
 
     /// <summary>
     /// Loads an existing receipt for the vehicle (signed preferred), refreshing DocuSeal if needed.
@@ -211,6 +235,7 @@ public sealed class VehicleInvoiceService
             invoice.Model,
             vehicle.SellerEmail ?? string.Empty,
             vehicle.SellerName,
+            invoice.Template.DocuSealTemplateId,
             ct);
 
         await _vehicles.SaveSignatureSentAsync(

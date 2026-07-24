@@ -13,6 +13,9 @@ public sealed class PurchaseInvoiceModel
     public string BuyerCityStateZip { get; init; } = string.Empty;
     public string BuyerEmail { get; init; } = string.Empty;
     public string? TemplateName { get; init; }
+    public string? LogoRelativePath { get; init; }
+    /// <summary>When false, footer uses a solid bar instead of the RSY footer image.</summary>
+    public bool UseRsyFooter { get; init; } = true;
 
     public string? SellerName { get; init; }
     public string? SellerPhone { get; init; }

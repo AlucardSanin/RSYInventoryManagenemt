@@ -251,6 +251,7 @@ public partial class YardInventoryDbContext : DbContext
             entity.Property(e => e.Phone).HasMaxLength(40);
             entity.Property(e => e.PdfRelativePath).HasMaxLength(400);
             entity.Property(e => e.LogoRelativePath).HasMaxLength(400);
+            entity.Property(e => e.MatchedSourceName).HasMaxLength(100);
             entity.Property(e => e.TemplateKind).HasDefaultValue(0);
             entity.Property(e => e.IsDefault).HasDefaultValue(false);
             entity.Property(e => e.IsActive).HasDefaultValue(true);

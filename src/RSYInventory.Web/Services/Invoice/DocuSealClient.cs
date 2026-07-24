@@ -25,8 +25,7 @@ public sealed class DocuSealClient
     public bool IsConfigured =>
         _options.Enabled
         && !string.IsNullOrWhiteSpace(_options.ApiKey)
-        && !string.IsNullOrWhiteSpace(_options.BaseUrl)
-        && _options.TemplateId > 0;
+        && !string.IsNullOrWhiteSpace(_options.BaseUrl);
 
     /// <summary>
     /// Free DocuSeal OSS only supports submissions from an existing template.
@@ -36,11 +35,20 @@ public sealed class DocuSealClient
         PurchaseInvoiceModel model,
         string sellerEmail,
         string? sellerName,
+        int? docuSealTemplateId = null,
         CancellationToken ct = default)
     {
         if (!IsConfigured)
             throw new InvalidOperationException(
-                "DocuSeal no está configurado. Completa DocuSeal:Enabled, BaseUrl, ApiKey y TemplateId.");
+                "DocuSeal no está configurado. Completa DocuSeal:Enabled, BaseUrl y ApiKey.");
+
+        var templateId = docuSealTemplateId is > 0
+            ? docuSealTemplateId.Value
+            : _options.TemplateId;
+
+        if (templateId <= 0)
+            throw new InvalidOperationException(
+                "Falta el TemplateId de DocuSeal para esta plantilla. Configúralo en Administración → Plantillas de recibo.");
 
         if (string.IsNullOrWhiteSpace(sellerEmail))
             throw new InvalidOperationException("El vendedor no tiene correo para firmar.");
@@ -59,7 +67,7 @@ public sealed class DocuSealClient
 
         var payload = new
         {
-            template_id = _options.TemplateId,
+            template_id = templateId,
             send_email = _options.SendEmail,
             order = "preserved",
             submitters = new object[]
@@ -170,7 +178,7 @@ public sealed class DocuSealClient
     {
         if (!IsConfigured)
             throw new InvalidOperationException(
-                "DocuSeal no está configurado. Completa DocuSeal:Enabled, BaseUrl, ApiKey y TemplateId.");
+                "DocuSeal no está configurado. Completa DocuSeal:Enabled, BaseUrl y ApiKey.");
     }
 }
 
@@ -190,6 +198,7 @@ public static class DocuSealReceiptFields
     public const string BuyerEmail = "BuyerEmail";
     public const string Description = "Description";
     public const string Price = "Price";
+    public const string Amount = "Amount";
     public const string PaymentMethod = "PaymentMethod";
     public const string SellerSignature = "SellerSignature";
     public const string SellerDate = "SellerDate";
@@ -201,6 +210,7 @@ public static class DocuSealReceiptFields
     public static Dictionary<string, object> BuildPrefillValues(PurchaseInvoiceModel model)
     {
         var money = model.PurchasePrice.ToString("C", Us);
+        var docNo = model.DocumentNumber.ToString("000000", Us);
         var ymm = string.Join(" / ", new[]
         {
             model.VehicleYear?.ToString(Us),
@@ -214,9 +224,13 @@ public static class DocuSealReceiptFields
             model.BuyerCityStateZip
         }.Where(s => !string.IsNullOrWhiteSpace(s)));
 
-        return new Dictionary<string, object>
+        // Canonical names + common aliases (if DocuSeal fields were named from the old guide).
+        return new Dictionary<string, object>(StringComparer.Ordinal)
         {
-            [DocumentNumber] = model.DocumentNumber.ToString("000000", Us),
+            [DocumentNumber] = docNo,
+            ["No.DocumentNumber"] = docNo,
+            ["NO.DocumentNumber"] = docNo,
+            ["Document Number"] = docNo,
             [PurchaseDate] = model.PurchaseDate.ToString("MMMM d, yyyy", Us),
             [VehicleYmm] = ymm,
             [Vin] = model.VehicleVin?.Trim() ?? "",
@@ -229,6 +243,9 @@ public static class DocuSealReceiptFields
             [BuyerEmail] = model.BuyerEmail?.Trim() ?? "",
             [Description] = $"Purchase of {model.VehicleDescription}",
             [Price] = money,
+            [Amount] = money,
+            ["SalePrice"] = money,
+            ["Sale price"] = money,
             [PaymentMethod] = model.PaymentMethod?.Trim() ?? ""
         };
     }
