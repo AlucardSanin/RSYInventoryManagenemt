@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using RSYInventory.Data.Data;
 using RSYInventory.Data.Entities;
 using RSYInventory.Data.Enums;
+using RSYInventory.Data;
 
 namespace RSYInventory.Data.Services;
 
@@ -123,8 +124,11 @@ public class VehicleService
         if (await db.Vehicles.AnyAsync(v => v.Vin == vin, ct))
             throw new InvalidOperationException("Ya existe un vehículo con ese VIN.");
 
-        if (!await db.VehicleSources.AnyAsync(s => s.Id == vehicleSourceId && s.IsActive, ct))
-            throw new InvalidOperationException("Fuente de adquisición inválida.");
+        var source = await db.VehicleSources.AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Id == vehicleSourceId && s.IsActive, ct)
+            ?? throw new InvalidOperationException("Fuente de adquisición inválida.");
+
+        var auction = VehicleSourceKinds.IsAuctionSource(source.Name);
 
         var vehicle = new Vehicle
         {
@@ -137,14 +141,14 @@ public class VehicleService
             Mileage = mileage,
             PurchasePrice = purchasePrice is null or <= 0 ? null : Math.Round(purchasePrice.Value, 2, MidpointRounding.AwayFromZero),
             Observations = observations,
-            AcquisitionLocation = NullIfWhiteSpace(acquisitionLocation),
-            SellerName = NullIfWhiteSpace(sellerName),
-            SellerPhone = NullIfWhiteSpace(sellerPhone),
-            SellerEmail = NullIfWhiteSpace(sellerEmail),
+            AcquisitionLocation = auction ? null : NullIfWhiteSpace(acquisitionLocation),
+            SellerName = auction ? null : NullIfWhiteSpace(sellerName),
+            SellerPhone = auction ? null : NullIfWhiteSpace(sellerPhone),
+            SellerEmail = auction ? null : NullIfWhiteSpace(sellerEmail),
             PickupDriver = NullIfWhiteSpace(pickupDriver),
             PaymentMethod = NullIfWhiteSpace(paymentMethod),
             VehicleSourceId = vehicleSourceId,
-            AcquiredAt = acquiredAt,
+            AcquiredAt = acquiredAt == default ? DateTime.Today : acquiredAt,
             AcquiredByUserId = _currentUser.UserId,
             PalletId = null,
             CreatedAtUtc = DateTime.UtcNow
@@ -378,6 +382,8 @@ public class VehicleService
         if (!source.IsActive && vehicle.VehicleSourceId != vehicleSourceId)
             throw new InvalidOperationException("Fuente de adquisición inválida.");
 
+        var auction = VehicleSourceKinds.IsAuctionSource(source.Name);
+
         vehicle.Vin = vin;
         vehicle.Year = year;
         vehicle.Make = string.IsNullOrWhiteSpace(make) ? null : make.Trim();
@@ -389,14 +395,14 @@ public class VehicleService
             ? null
             : Math.Round(purchasePrice.Value, 2, MidpointRounding.AwayFromZero);
         vehicle.Observations = string.IsNullOrWhiteSpace(observations) ? null : observations.Trim();
-        vehicle.AcquisitionLocation = NullIfWhiteSpace(acquisitionLocation);
-        vehicle.SellerName = NullIfWhiteSpace(sellerName);
-        vehicle.SellerPhone = NullIfWhiteSpace(sellerPhone);
-        vehicle.SellerEmail = NullIfWhiteSpace(sellerEmail);
+        vehicle.AcquisitionLocation = auction ? null : NullIfWhiteSpace(acquisitionLocation);
+        vehicle.SellerName = auction ? null : NullIfWhiteSpace(sellerName);
+        vehicle.SellerPhone = auction ? null : NullIfWhiteSpace(sellerPhone);
+        vehicle.SellerEmail = auction ? null : NullIfWhiteSpace(sellerEmail);
         vehicle.PickupDriver = NullIfWhiteSpace(pickupDriver);
         vehicle.PaymentMethod = NullIfWhiteSpace(paymentMethod);
         vehicle.VehicleSourceId = vehicleSourceId;
-        vehicle.AcquiredAt = acquiredAt;
+        vehicle.AcquiredAt = acquiredAt == default ? DateTime.Today : acquiredAt;
         vehicle.UpdatedAtUtc = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
@@ -416,8 +422,14 @@ public class VehicleService
             await using var db = await _dbFactory.CreateDbContextAsync(ct);
             await using var tx = await db.Database.BeginTransactionAsync(ct);
 
-            var vehicle = await db.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+            var vehicle = await db.Vehicles
+                .Include(v => v.VehicleSource)
+                .FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
                 ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+            if (VehicleSourceKinds.IsAuctionSource(vehicle.VehicleSource?.Name))
+                throw new InvalidOperationException(
+                    "Las compras en subasta (Copart / IAAI) no generan recibo de compra.");
 
             if (vehicle.InvoiceNumber is > 0)
             {

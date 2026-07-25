@@ -108,26 +108,32 @@ else if (_vehicle is not null && !_editing)
                         <dt>Fuente</dt>
                         <dd>@(_vehicle.VehicleSource?.Name ?? "—")</dd>
                     </div>
+                    @if (!IsAuctionVehicle)
+                    {
+                        <div>
+                            <dt>Lugar de obtención</dt>
+                            <dd>@(string.IsNullOrWhiteSpace(_vehicle.AcquisitionLocation) ? "—" : _vehicle.AcquisitionLocation)</dd>
+                        </div>
+                    }
                     <div>
-                        <dt>Lugar de obtención</dt>
-                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.AcquisitionLocation) ? "—" : _vehicle.AcquisitionLocation)</dd>
-                    </div>
-                    <div>
-                        <dt>Fecha de adquisición</dt>
+                        <dt>@(IsAuctionVehicle ? "Fecha en que se ganó" : "Fecha de adquisición")</dt>
                         <dd>@_vehicle.AcquiredAt.ToString("yyyy-MM-dd")</dd>
                     </div>
-                    <div>
-                        <dt>Vendedor</dt>
-                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.SellerName) ? "—" : _vehicle.SellerName)</dd>
-                    </div>
-                    <div>
-                        <dt>Teléfono vendedor</dt>
-                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.SellerPhone) ? "—" : _vehicle.SellerPhone)</dd>
-                    </div>
-                    <div>
-                        <dt>Correo vendedor</dt>
-                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.SellerEmail) ? "—" : _vehicle.SellerEmail)</dd>
-                    </div>
+                    @if (!IsAuctionVehicle)
+                    {
+                        <div>
+                            <dt>Vendedor</dt>
+                            <dd>@(string.IsNullOrWhiteSpace(_vehicle.SellerName) ? "—" : _vehicle.SellerName)</dd>
+                        </div>
+                        <div>
+                            <dt>Teléfono vendedor</dt>
+                            <dd>@(string.IsNullOrWhiteSpace(_vehicle.SellerPhone) ? "—" : _vehicle.SellerPhone)</dd>
+                        </div>
+                        <div>
+                            <dt>Correo vendedor</dt>
+                            <dd>@(string.IsNullOrWhiteSpace(_vehicle.SellerEmail) ? "—" : _vehicle.SellerEmail)</dd>
+                        </div>
+                    }
                     <div>
                         <dt>Chofer que recogió</dt>
                         <dd>@(string.IsNullOrWhiteSpace(_vehicle.PickupDriver) ? "—" : _vehicle.PickupDriver)</dd>
@@ -136,10 +142,13 @@ else if (_vehicle is not null && !_editing)
                         <dt>Método de pago</dt>
                         <dd>@(string.IsNullOrWhiteSpace(_vehicle.PaymentMethod) ? "—" : _vehicle.PaymentMethod)</dd>
                     </div>
-                    <div>
-                        <dt>Recibo de compra</dt>
-                        <dd>@(_vehicle.InvoiceNumber is null ? "Sin generar" : $"#{_vehicle.InvoiceNumber}")</dd>
-                    </div>
+                    @if (!IsAuctionVehicle)
+                    {
+                        <div>
+                            <dt>Recibo de compra</dt>
+                            <dd>@(_vehicle.InvoiceNumber is null ? "Sin generar" : $"#{_vehicle.InvoiceNumber}")</dd>
+                        </div>
+                    }
                     <div>
                         <dt>Ubicación en yarda</dt>
                         <dd>
@@ -164,7 +173,7 @@ else if (_vehicle is not null && !_editing)
                 </dl>
 
                 <div class="form-actions mt-3">
-                    @if (CurrentUser.CanEditVehicles)
+                    @if (CurrentUser.CanEditVehicles && !IsAuctionVehicle)
                     {
                         <button type="button" class="btn btn-outline-primary" @onclick="GenerateInvoiceAsync" disabled="@Busy.IsBusy">
                             @(_vehicle.InvoiceNumber is null ? "Generar recibo de compra" : $"Ver recibo #{_vehicle.InvoiceNumber}")
@@ -265,25 +274,28 @@ else if (_vehicle is not null && _editing)
                                      AllowCustom="false" />
                 </div>
                 <div class="col-md-3">
-                    <label class="form-label">Fecha de adquisición *</label>
+                    <label class="form-label">@(IsAuctionVehicle ? "Fecha en que se ganó *" : "Fecha de adquisición *")</label>
                     <InputDate class="form-control" @bind-Value="_edit.AcquiredAt" />
                 </div>
-                <div class="col-md-6">
-                    <label class="form-label">Lugar de obtención</label>
-                    <InputText class="form-control" @bind-Value="_edit.AcquisitionLocation" placeholder="Dirección o ciudad donde se recogió" />
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label">Nombre del vendedor</label>
-                    <InputText class="form-control" @bind-Value="_edit.SellerName" />
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label">Teléfono</label>
-                    <InputText class="form-control" @bind-Value="_edit.SellerPhone" />
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label">Correo</label>
-                    <InputText class="form-control" @bind-Value="_edit.SellerEmail" />
-                </div>
+                @if (!IsAuctionVehicle)
+                {
+                    <div class="col-md-6">
+                        <label class="form-label">Lugar de obtención</label>
+                        <InputText class="form-control" @bind-Value="_edit.AcquisitionLocation" placeholder="Dirección o ciudad donde se recogió" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Nombre del vendedor</label>
+                        <InputText class="form-control" @bind-Value="_edit.SellerName" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Teléfono</label>
+                        <InputText class="form-control" @bind-Value="_edit.SellerPhone" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Correo</label>
+                        <InputText class="form-control" @bind-Value="_edit.SellerEmail" />
+                    </div>
+                }
                 <div class="col-md-6">
                     <label class="form-label">Chofer que recogió</label>
                     <InputText class="form-control" @bind-Value="_edit.PickupDriver" placeholder="Nombre del chofer" />
@@ -383,6 +395,9 @@ else if (_vehicle is not null && _editing)
     private string? _vinHint;
 
     private bool CanEdit => CurrentUser.CanEditVehicles;
+
+    private bool IsAuctionVehicle =>
+        VehicleSourceKinds.IsAuctionSource(_vehicle?.VehicleSource?.Name);
     private string HeaderTitle => _vehicle is null
         ? "Vehículo"
         : string.IsNullOrWhiteSpace($"{_vehicle.Year} {_vehicle.Make} {_vehicle.Model}".Trim())
@@ -804,6 +819,12 @@ else if (_vehicle is not null && _editing)
 
     private async Task GenerateInvoiceAsync()
     {
+        if (IsAuctionVehicle)
+        {
+            Toasts.Info("Las compras en subasta (Copart / IAAI) no generan recibo de compra.");
+            return;
+        }
+
         if (_vehicle is null || _invoiceDialog is null) return;
         _error = null;
         try

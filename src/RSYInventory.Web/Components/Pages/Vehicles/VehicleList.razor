@@ -39,15 +39,33 @@ else
 {
     <div class="page-panel mb-3">
         <div class="row g-2 align-items-end">
-            <div class="col-md-6">
+            <div class="col-md-4">
                 <label class="form-label" for="veh-search">Búsqueda rápida</label>
                 <input id="veh-search"
                        class="form-control"
-                       placeholder="VIN, recib, marca, modelo, año, fuente…"
+                       placeholder="VIN, recib, marca, modelo, año…"
                        @bind="_search"
                        @bind:event="oninput" />
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
+                <label class="form-label" for="veh-source">Fuente</label>
+                <select id="veh-source" class="form-select" @bind="_sourceFilter">
+                    <option value="">Todas</option>
+                    @foreach (var src in SourceOptions)
+                    {
+                        <option value="@src">@src</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label" for="veh-from">Desde</label>
+                <InputDate id="veh-from" class="form-control" @bind-Value="_fromDate" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label" for="veh-to">Hasta</label>
+                <InputDate id="veh-to" class="form-control" @bind-Value="_toDate" />
+            </div>
+            <div class="col-md-2">
                 <label class="form-label">Ubicación</label>
                 <select class="form-select" @bind="_locationFilter">
                     <option value="">Todas</option>
@@ -55,7 +73,7 @@ else
                     <option value="unlocated">Sin ubicar</option>
                 </select>
             </div>
-            <div class="col-md-3">
+            <div class="col-12">
                 <p class="form-hint mb-0">@Filtered.Count() de @_items.Count vehículos</p>
             </div>
         </div>
@@ -152,7 +170,20 @@ else
     private string? _error;
     private string _search = string.Empty;
     private string _locationFilter = string.Empty;
+    private string _sourceFilter = string.Empty;
+    private DateTime? _fromDate;
+    private DateTime? _toDate;
     private ImageViewer? _viewer;
+
+    private IEnumerable<string> SourceOptions =>
+        _items is null
+            ? Enumerable.Empty<string>()
+            : _items
+                .Select(v => v.VehicleSource?.Name)
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Select(n => n!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase);
 
     private IEnumerable<Vehicle> Filtered
     {
@@ -165,6 +196,21 @@ else
                 q = q.Where(v => v.PalletId is not null);
             else if (_locationFilter == "unlocated")
                 q = q.Where(v => v.PalletId is null);
+
+            if (!string.IsNullOrWhiteSpace(_sourceFilter))
+                q = q.Where(v => string.Equals(v.VehicleSource?.Name, _sourceFilter, StringComparison.OrdinalIgnoreCase));
+
+            if (_fromDate is DateTime from)
+            {
+                var fromDay = from.Date;
+                q = q.Where(v => v.AcquiredAt.Date >= fromDay);
+            }
+
+            if (_toDate is DateTime to)
+            {
+                var toDay = to.Date;
+                q = q.Where(v => v.AcquiredAt.Date <= toDay);
+            }
 
             var s = _search.Trim();
             if (string.IsNullOrEmpty(s)) return q;

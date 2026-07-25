@@ -10,6 +10,10 @@ This folder holds the SQL Server scripts that define and evolve the yard invento
 | `009_VehicleSellerAndAcquisitionLocation.sql` | Peddle rename + seller/location fields on Vehicles. |
 | `010_VehiclePickupDriver.sql` | Driver who collected the vehicle (`PickupDriver`). |
 | `011_VehicleInvoiceAndPayment.sql` | Payment method, invoice number (from 1000), `InvoiceSequence`. |
+| `012_InvoiceTemplates.sql` | Branding templates for purchase receipts. |
+| `013_VehicleInvoiceSigning.sql` | DocuSeal signing columns on Vehicles. |
+| `014_SaulMotorsSourceAndTemplate.sql` | Sauls Motor Co source + invoice template. |
+| `015_AuctionSources.sql` | Copart / IAAI auction sources (no seller / no receipt). |
 
 ## Workflow
 

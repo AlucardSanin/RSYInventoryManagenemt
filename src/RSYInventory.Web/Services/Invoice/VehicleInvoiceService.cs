@@ -1,3 +1,4 @@
+using RSYInventory.Data;
 using RSYInventory.Data.Entities;
 using RSYInventory.Data.Services;
 using RSYInventory.Web.Services;
@@ -81,6 +82,9 @@ public sealed class VehicleInvoiceService
         var vehicle = await _vehicles.GetByIdAsync(vehicleId, ct)
             ?? throw new InvalidOperationException("Vehículo no encontrado.");
 
+        if (VehicleSourceKinds.IsAuctionSource(vehicle.VehicleSource?.Name))
+            return null;
+
         if (vehicle.InvoiceNumber is not > 0)
             return null;
 
@@ -143,6 +147,10 @@ public sealed class VehicleInvoiceService
     {
         var vehicle = await _vehicles.GetByIdAsync(vehicleId, ct)
             ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+        if (VehicleSourceKinds.IsAuctionSource(vehicle.VehicleSource?.Name))
+            throw new InvalidOperationException(
+                "Las compras en subasta (Copart / IAAI) no generan recibo de compra.");
 
         var template = templateId is int id
             ? await _templates.GetByIdAsync(id, ct)

@@ -12,7 +12,7 @@
 
 <PageHeader Title="Registrar vehículo adquirido"
             Eyebrow="Vehículos"
-            Lead="VIN, datos del auto, de dónde salió y contacto del vendedor. En móvil el formulario va por pasos.">
+            Lead="VIN, datos del auto y origen de la compra. En móvil el formulario va por pasos.">
     <a class="btn btn-outline-secondary" href="vehicles">Volver a vehículos</a>
 </PageHeader>
 
@@ -29,21 +29,22 @@
     <EditForm Model="_model" OnValidSubmit="SaveAsync">
         <div class="form-stepper" data-step="@_mobileStep">
             <div class="form-stepper__progress" aria-hidden="true">
-                @for (var i = 1; i <= MobileStepCount; i++)
+                @for (var i = 1; i <= CurrentMobileStepCount; i++)
                 {
                     <span class="form-stepper__dot @(i == _mobileStep ? "is-active" : null) @(i < _mobileStep ? "is-done" : null)"></span>
                 }
             </div>
-            <p class="form-stepper__label">Paso @_mobileStep de @MobileStepCount · @MobileStepTitle</p>
+            <p class="form-stepper__label">Paso @_mobileStep de @CurrentMobileStepCount · @MobileStepTitle</p>
 
             @* 1 · VIN *@
             <div class="form-step @(_mobileStep == 1 ? "is-active" : null)">
-                <div class="row g-3">
-                    <div class="col-md-8">
+                <h2 class="form-step__title">Identificación</h2>
+                <div class="row g-3 align-items-end">
+                    <div class="col-lg-8 col-md-7">
                         <label class="form-label">VIN *</label>
                         <InputText class="form-control mono" @bind-Value="_model.Vin" maxlength="17" placeholder="17 caracteres" />
                     </div>
-                    <div class="col-md-4 d-flex flex-column justify-content-end">
+                    <div class="col-lg-4 col-md-5">
                         <button type="button" class="btn btn-outline-primary w-100" @onclick="DecodeVinAsync" disabled="@Busy.IsBusy">Decodificar VIN</button>
                         @if (!string.IsNullOrEmpty(_vinHint))
                         {
@@ -53,10 +54,11 @@
                 </div>
             </div>
 
-            @* 2 · Identificación del vehículo *@
+            @* 2 · Datos del vehículo *@
             <div class="form-step @(_mobileStep == 2 ? "is-active" : null)">
+                <h2 class="form-step__title">Vehículo</h2>
                 <div class="row g-3">
-                    <div class="col-md-3">
+                    <div class="col-md-4">
                         <label class="form-label" for="year-combo">Año</label>
                         <SearchableCombo InputId="year-combo"
                                          Value="@YearValue"
@@ -67,7 +69,7 @@
                                          AllowCustom="false"
                                          MaxSuggestions="@VehicleYearCatalog.DropdownVisibleCount" />
                     </div>
-                    <div class="col-md-3">
+                    <div class="col-md-4">
                         <label class="form-label" for="make-combo">Marca</label>
                         <SearchableCombo InputId="make-combo"
                                          Value="@_model.Make"
@@ -78,7 +80,7 @@
                                          Disabled="@(_model.Year is null)"
                                          AllowCustom="true" />
                     </div>
-                    <div class="col-md-3">
+                    <div class="col-md-4">
                         <label class="form-label" for="model-combo">Modelo</label>
                         <SearchableCombo InputId="model-combo"
                                          @bind-Value="_model.Model"
@@ -89,7 +91,7 @@
                                          AllowCustom="true"
                                          MaxSuggestions="50" />
                     </div>
-                    <div class="col-md-3">
+                    <div class="col-md-4">
                         <label class="form-label">Millas <span class="form-hint">(opcional)</span></label>
                         <InputNumber class="form-control" @bind-Value="_model.Mileage" placeholder="Ej. 85000" />
                     </div>
@@ -111,19 +113,16 @@
                                          Placeholder="FWD, RWD, AWD…"
                                          AllowCustom="false" />
                     </div>
-                    <div class="col-md-4">
-                        <label class="form-label" for="price-input">Precio de compra <span class="form-hint">(USD)</span></label>
-                        <UsdMoneyInput InputId="price-input" @bind-Value="_model.PurchasePrice" Placeholder="2500.00" />
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label">Método de pago <span class="form-hint">(opcional)</span></label>
-                        <InputText class="form-control" @bind-Value="_model.PaymentMethod" placeholder="Cash, Zelle, Check…" />
-                    </div>
                 </div>
             </div>
 
-            @* 3 · Fuente y lugar *@
+            @* 3 · Compra / fuente *@
             <div class="form-step @(_mobileStep == 3 ? "is-active" : null)">
+                <h2 class="form-step__title">@(IsAuctionSource ? "Subasta" : "Compra")</h2>
+                @if (IsAuctionSource)
+                {
+                    <p class="form-step__lead">Sin vendedor particular ni recibo de compra. Indica cuándo se ganó y el costo.</p>
+                }
                 <div class="row g-3">
                     <div class="col-md-4">
                         <label class="form-label" for="source-combo">Fuente *</label>
@@ -135,56 +134,87 @@
                                          AllowCustom="false" />
                     </div>
                     <div class="col-md-4">
-                        <label class="form-label">Fecha de adquisición *</label>
+                        <label class="form-label">@(IsAuctionSource ? "Fecha en que se ganó *" : "Fecha de adquisición *")</label>
                         <InputDate class="form-control" @bind-Value="_model.AcquiredAt" />
                     </div>
-                    <div class="col-md-4">
-                        <label class="form-label">Lugar de obtención</label>
-                        <InputText class="form-control" @bind-Value="_model.AcquisitionLocation" placeholder="Dirección o ciudad donde se recogió" />
-                    </div>
+                    @if (IsAuctionSource)
+                    {
+                        <div class="col-md-4">
+                            <label class="form-label" for="price-input">Precio de compra <span class="form-hint">(USD)</span></label>
+                            <UsdMoneyInput InputId="price-input" @bind-Value="_model.PurchasePrice" Placeholder="2500.00" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Método de pago <span class="form-hint">(opcional)</span></label>
+                            <InputText class="form-control" @bind-Value="_model.PaymentMethod" placeholder="Cash, Zelle, Check…" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Chofer que recogió <span class="form-hint">(opcional)</span></label>
+                            <InputText class="form-control" @bind-Value="_model.PickupDriver" placeholder="Nombre del chofer" />
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="col-md-4">
+                            <label class="form-label">Lugar de obtención</label>
+                            <InputText class="form-control" @bind-Value="_model.AcquisitionLocation" placeholder="Dirección o ciudad donde se recogió" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" for="price-input">Precio de compra <span class="form-hint">(USD)</span></label>
+                            <UsdMoneyInput InputId="price-input" @bind-Value="_model.PurchasePrice" Placeholder="2500.00" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Método de pago <span class="form-hint">(opcional)</span></label>
+                            <InputText class="form-control" @bind-Value="_model.PaymentMethod" placeholder="Cash, Zelle, Check…" />
+                        </div>
+                    }
                 </div>
             </div>
 
-            @* 4 · Vendedor y chofer *@
-            <div class="form-step @(_mobileStep == 4 ? "is-active" : null)">
-                <div class="row g-3">
-                    <div class="col-12">
-                        <p class="form-hint mb-0">Contacto del vendedor y quién recogió el vehículo (opcionales).</p>
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label">Nombre del vendedor</label>
-                        <InputText class="form-control" @bind-Value="_model.SellerName" placeholder="Nombre completo" autocomplete="name" />
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label">Teléfono</label>
-                        <InputText class="form-control" @bind-Value="_model.SellerPhone" placeholder="Ej. 787-555-0100" autocomplete="tel" />
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label">Correo</label>
-                        <InputText class="form-control" @bind-Value="_model.SellerEmail" placeholder="correo@ejemplo.com" autocomplete="email" />
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label">Chofer que recogió</label>
-                        <InputText class="form-control" @bind-Value="_model.PickupDriver" placeholder="Nombre del chofer" />
+            @* 4 · Vendedor / recogida (solo fuentes con vendedor particular) *@
+            @if (!IsAuctionSource)
+            {
+                <div class="form-step @(_mobileStep == 4 ? "is-active" : null)">
+                    <h2 class="form-step__title">Vendedor y recogida</h2>
+                    <p class="form-step__lead">Contacto del vendedor y quién recogió el vehículo (opcionales).</p>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Nombre del vendedor</label>
+                            <InputText class="form-control" @bind-Value="_model.SellerName" placeholder="Nombre completo" autocomplete="name" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Teléfono</label>
+                            <InputText class="form-control" @bind-Value="_model.SellerPhone" placeholder="Ej. 787-555-0100" autocomplete="tel" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Correo</label>
+                            <InputText class="form-control" @bind-Value="_model.SellerEmail" placeholder="correo@ejemplo.com" autocomplete="email" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Chofer que recogió</label>
+                            <InputText class="form-control" @bind-Value="_model.PickupDriver" placeholder="Nombre del chofer" />
+                        </div>
                     </div>
                 </div>
-            </div>
+            }
 
-            @* 5 · Fotos y notas *@
-            <div class="form-step @(_mobileStep == 5 ? "is-active" : null)">
+            @* Último · Fotos y notas *@
+            <div class="form-step @(_mobileStep == PhotosStep ? "is-active" : null)">
+                <h2 class="form-step__title">Fotos y notas</h2>
                 <div class="row g-3">
-                    <div class="col-md-6">
-                        <label class="form-label">Fotos <span class="form-hint">(opcional)</span></label>
-                        <InputFile class="form-control" OnChange="OnImagesSelected" accept=".jpg,.jpeg,.png,.webp,image/*" multiple />
-                        <div class="image-upload-hint">JPG/PNG/WEBP · puedes seleccionar varias.</div>
-                        @if (_imageFiles.Count > 0)
-                        {
-                            <div class="form-hint mt-1">@_imageFiles.Count foto(s): @string.Join(", ", _imageFiles.Select(f => f.Name))</div>
-                        }
+                    <div class="col-md-5">
+                        <div class="image-upload-slot">
+                            <label class="form-label">Fotos <span class="form-hint">(opcional)</span></label>
+                            <InputFile class="form-control" OnChange="OnImagesSelected" accept=".jpg,.jpeg,.png,.webp,image/*" multiple />
+                            <div class="image-upload-hint">JPG/PNG/WEBP · puedes seleccionar varias.</div>
+                            @if (_imageFiles.Count > 0)
+                            {
+                                <div class="form-hint">@_imageFiles.Count foto(s): @string.Join(", ", _imageFiles.Select(f => f.Name))</div>
+                            }
+                        </div>
                     </div>
-                    <div class="col-md-6">
+                    <div class="col-md-7">
                         <label class="form-label">Observaciones <span class="form-hint">(opcional)</span></label>
-                        <InputTextArea class="form-control" @bind-Value="_model.Observations" rows="3" />
+                        <InputTextArea class="form-control" @bind-Value="_model.Observations" rows="5" />
                     </div>
                 </div>
             </div>
@@ -194,7 +224,7 @@
                 {
                     <button type="button" class="btn btn-outline-secondary" @onclick="PreviousStep" disabled="@Busy.IsBusy">Atrás</button>
                 }
-                @if (_mobileStep < MobileStepCount)
+                @if (_mobileStep < CurrentMobileStepCount)
                 {
                     <button type="button" class="btn btn-primary" @onclick="NextStep" disabled="@Busy.IsBusy">Siguiente</button>
                 }
@@ -219,7 +249,8 @@
 <InvoicePreviewDialog @ref="_invoiceDialog" OnClosed="OnInvoiceClosed" />
 
 @code {
-    private const int MobileStepCount = 5;
+    private const int PrivateSellerStepCount = 5;
+    private const int AuctionStepCount = 4;
 
     private static readonly IReadOnlyList<ComboOption> _transmissionOptions =
     [
@@ -260,12 +291,19 @@
     private string? DriveValue => _model.DriveType is null ? null : ((int)_model.DriveType.Value).ToString();
     private string? SourceValue => _model.VehicleSourceId <= 0 ? null : _model.VehicleSourceId.ToString();
 
+    private bool IsAuctionSource =>
+        VehicleSourceKinds.IsAuctionSource(
+            _sources.FirstOrDefault(s => s.Id == _model.VehicleSourceId)?.Name);
+
+    private int CurrentMobileStepCount => IsAuctionSource ? AuctionStepCount : PrivateSellerStepCount;
+    private int PhotosStep => CurrentMobileStepCount;
+
     private string MobileStepTitle => _mobileStep switch
     {
         1 => "VIN",
-        2 => "Datos del vehículo",
-        3 => "Fuente y lugar",
-        4 => "Vendedor y chofer",
+        2 => "Vehículo",
+        3 => IsAuctionSource ? "Subasta" : "Compra",
+        4 when !IsAuctionSource => "Vendedor y recogida",
         _ => "Fotos y notas"
     };
 
@@ -318,7 +356,7 @@
             return;
         }
 
-        if (_mobileStep < MobileStepCount)
+        if (_mobileStep < CurrentMobileStepCount)
             _mobileStep++;
     }
 
@@ -383,6 +421,21 @@
     private Task OnSourceChangedAsync(string? value)
     {
         _model.VehicleSourceId = int.TryParse(value, out var id) ? id : 0;
+        if (IsAuctionSource)
+        {
+            // Auctions have no private seller; keep win date defaulted to today if empty/unset.
+            _model.SellerName = null;
+            _model.SellerPhone = null;
+            _model.SellerEmail = null;
+            _model.AcquisitionLocation = null;
+            if (_model.AcquiredAt == default)
+                _model.AcquiredAt = DateTime.Today;
+
+            // Seller step disappears; clamp mobile wizard to the shorter flow.
+            if (_mobileStep > CurrentMobileStepCount)
+                _mobileStep = CurrentMobileStepCount;
+        }
+
         return Task.CompletedTask;
     }
 
@@ -545,6 +598,7 @@
                 if (_model.VehicleSourceId <= 0)
                     throw new InvalidOperationException("Seleccione una fuente.");
 
+                var auction = IsAuctionSource;
                 var created = await Vehicles.AcquireAsync(
                     _model.Vin ?? string.Empty,
                     _model.Year,
@@ -556,11 +610,11 @@
                     _model.PurchasePrice,
                     _model.Observations,
                     _model.VehicleSourceId,
-                    _model.AcquiredAt,
-                    _model.AcquisitionLocation,
-                    _model.SellerName,
-                    _model.SellerPhone,
-                    _model.SellerEmail,
+                    _model.AcquiredAt == default ? DateTime.Today : _model.AcquiredAt,
+                    auction ? null : _model.AcquisitionLocation,
+                    auction ? null : _model.SellerName,
+                    auction ? null : _model.SellerPhone,
+                    auction ? null : _model.SellerEmail,
                     _model.PickupDriver,
                     _model.PaymentMethod);
 
@@ -596,7 +650,9 @@
                     Toasts.Success("Vehículo registrado.");
                 }
 
-                _pendingInvoiceVehicleId = created.Id;
+                // Purchase receipts only apply to private-seller sources (not Copart/IAAI auctions).
+                if (!IsAuctionSource)
+                    _pendingInvoiceVehicleId = created.Id;
             }, "Guardando adquisición…");
 
             if (_pendingInvoiceVehicleId is int vehicleId && _invoiceDialog is not null)
