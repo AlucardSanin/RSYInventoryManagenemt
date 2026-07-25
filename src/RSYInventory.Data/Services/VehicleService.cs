@@ -58,6 +58,8 @@ public class VehicleService
 
     public async Task<List<Vehicle>> GetAllAsync(CancellationToken ct = default)
     {
+        EnsureCanViewVehicles();
+
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         return await db.Vehicles
             .AsNoTracking()
@@ -71,6 +73,8 @@ public class VehicleService
 
     public async Task<Vehicle?> GetByIdAsync(int id, CancellationToken ct = default)
     {
+        EnsureCanViewVehicles();
+
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         return await db.Vehicles
             .AsNoTracking()
@@ -79,6 +83,12 @@ public class VehicleService
             .Include(v => v.Images)
             .Include(v => v.Pallet)!.ThenInclude(p => p!.Row)!.ThenInclude(r => r!.Zone)
             .FirstOrDefaultAsync(v => v.Id == id, ct);
+    }
+
+    private void EnsureCanViewVehicles()
+    {
+        if (!_currentUser.CanViewVehicles)
+            throw new UnauthorizedAccessException("No tiene permiso para ver vehículos.");
     }
 
     public async Task<Vehicle> AcquireAsync(

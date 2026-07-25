@@ -182,6 +182,12 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        if (!CurrentUser.CanViewVehicles)
+        {
+            _error = "No tiene permiso para ver vehículos.";
+            return;
+        }
+
         try
         {
             await Busy.RunAsync(async () =>

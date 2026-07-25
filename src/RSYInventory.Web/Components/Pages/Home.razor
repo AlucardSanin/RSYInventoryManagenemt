@@ -61,12 +61,16 @@ else
             </a>
         }
 
-        @if (CurrentUser.CanAcquireVehicles || CurrentUser.CanEditInventory)
+        @if (CurrentUser.CanViewVehicles)
         {
             <a class="task-card" href="vehicles">
                 <p class="task-card__kicker">Vehículos</p>
-                <h2 class="task-card__title">Ubicar vehículos</h2>
-                <p class="task-card__text">Lista de adquisiciones y asignación de paleta.</p>
+                <h2 class="task-card__title">@(CurrentUser.CanEditInventory || CurrentUser.CanAcquireVehicles ? "Ubicar vehículos" : "Ver vehículos adquiridos")</h2>
+                <p class="task-card__text">
+                    @(CurrentUser.CanEditInventory || CurrentUser.CanAcquireVehicles
+                        ? "Lista de adquisiciones y asignación de paleta."
+                        : "Consulta la lista y el detalle de vehículos (solo lectura).")
+                </p>
                 <p class="task-card__cta">Ver vehículos →</p>
             </a>
         }

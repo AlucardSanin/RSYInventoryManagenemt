@@ -406,6 +406,14 @@ else if (_vehicle is not null && _editing)
         _error = null;
         _editing = false;
         _galleryIndex = 0;
+
+        if (!CurrentUser.CanViewVehicles)
+        {
+            _error = "No tiene permiso para ver vehículos.";
+            _vehicle = null;
+            return;
+        }
+
         try
         {
             await Busy.RunAsync(async () =>

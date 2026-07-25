@@ -13,7 +13,7 @@
     <PackageReference Include="QuestPDF" Version="2025.7.2" />
   </ItemGroup>
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>12b00576-9693-4209-88ed-c01f272cdba6</UserSecretsId>
