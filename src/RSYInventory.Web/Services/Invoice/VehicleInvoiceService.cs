@@ -225,41 +225,51 @@ public sealed class VehicleInvoiceService
             ct);
     }
 
+    /// <summary>
+    /// Creates a DocuSeal signing URL. Emails the seller only when they have an address and SMTP works;
+    /// otherwise the URL must be shared manually (WhatsApp, SMS, in person).
+    /// </summary>
     public async Task<DocuSealSubmissionResult> SendSigningLinkAsync(
         VehicleInvoiceResult invoice,
         CancellationToken ct = default)
     {
         var vehicle = invoice.Vehicle;
+        var hasSellerEmail = !string.IsNullOrWhiteSpace(vehicle.SellerEmail);
 
         var result = await _docuSeal.CreatePurchaseReceiptSubmissionAsync(
             invoice.Model,
-            vehicle.SellerEmail ?? string.Empty,
+            vehicle.SellerEmail,
             vehicle.SellerName,
+            vehicle.Id,
             invoice.Template.DocuSealTemplateId,
             ct);
 
         await _vehicles.SaveSignatureSentAsync(
             vehicle.Id, result.SubmissionId, result.SellerSigningUrl, ct);
 
-        if (_email.IsConfigured)
+        var emailed = false;
+        if (hasSellerEmail && _email.IsConfigured)
         {
             await _email.SendSigningLinkAsync(
-                vehicle.SellerEmail ?? string.Empty,
+                vehicle.SellerEmail!,
                 vehicle.SellerName,
                 invoice.Model.DocumentNumber,
                 result.SellerSigningUrl,
                 ct);
+            emailed = true;
         }
 
         await _audit.WriteAsync(
             "SignatureLinkSent",
             "Vehicle",
             vehicle.Id,
-            $"Enlace de firma enviado para recibo #{invoice.Model.DocumentNumber}",
-            $"SubmissionId={result.SubmissionId}; Email={vehicle.SellerEmail}",
+            emailed
+                ? $"Enlace de firma enviado por correo para recibo #{invoice.Model.DocumentNumber}"
+                : $"Enlace de firma generado (sin correo) para recibo #{invoice.Model.DocumentNumber}",
+            $"SubmissionId={result.SubmissionId}; Email={vehicle.SellerEmail ?? "(none)"}; Emailed={emailed}",
             ct);
 
-        return result;
+        return result with { EmailSentByDocuSeal = emailed || result.EmailSentByDocuSeal };
     }
 
     public async Task<VehicleInvoiceResult> RefreshSignatureStatusAsync(

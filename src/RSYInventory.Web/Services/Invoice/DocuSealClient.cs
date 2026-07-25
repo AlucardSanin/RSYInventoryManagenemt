@@ -33,8 +33,9 @@ public sealed class DocuSealClient
     /// </summary>
     public async Task<DocuSealSubmissionResult> CreatePurchaseReceiptSubmissionAsync(
         PurchaseInvoiceModel model,
-        string sellerEmail,
+        string? sellerEmail,
         string? sellerName,
+        int vehicleId,
         int? docuSealTemplateId = null,
         CancellationToken ct = default)
     {
@@ -50,8 +51,16 @@ public sealed class DocuSealClient
             throw new InvalidOperationException(
                 "Falta el TemplateId de DocuSeal para esta plantilla. Configúralo en Administración → Plantillas de recibo.");
 
-        if (string.IsNullOrWhiteSpace(sellerEmail))
-            throw new InvalidOperationException("El vendedor no tiene correo para firmar.");
+        // DocuSeal requires an email on the submitter; when the seller has none we use a
+        // placeholder and share the signing URL manually (WhatsApp / in person).
+        var hasRealEmail = !string.IsNullOrWhiteSpace(sellerEmail);
+        var submitterEmail = hasRealEmail
+            ? sellerEmail!.Trim()
+            : $"unsigned+vehicle{vehicleId}@inventory-rsy.online";
+        var submitterName = string.IsNullOrWhiteSpace(sellerName)
+            ? (hasRealEmail ? submitterEmail : $"Seller vehicle #{vehicleId}")
+            : sellerName.Trim();
+        var sendEmail = hasRealEmail && _options.SendEmail;
 
         var sellerRole = string.IsNullOrWhiteSpace(_options.SellerRole)
             ? DocuSealReceiptFields.DefaultSellerRole
@@ -68,15 +77,15 @@ public sealed class DocuSealClient
         var payload = new
         {
             template_id = templateId,
-            send_email = _options.SendEmail,
+            send_email = sendEmail,
             order = "preserved",
             submitters = new object[]
             {
                 new
                 {
                     role = sellerRole,
-                    email = sellerEmail.Trim(),
-                    name = string.IsNullOrWhiteSpace(sellerName) ? sellerEmail.Trim() : sellerName.Trim(),
+                    email = submitterEmail,
+                    name = submitterName,
                     values,
                     fields
                 }
@@ -108,8 +117,9 @@ public sealed class DocuSealClient
         return new DocuSealSubmissionResult(
             seller.SubmissionId ?? 0,
             seller.EmbedSrc!,
-            seller.Email ?? sellerEmail,
-            seller.Status ?? "awaiting");
+            seller.Email ?? submitterEmail,
+            seller.Status ?? "awaiting",
+            EmailSentByDocuSeal: sendEmail);
     }
 
     public async Task<DocuSealSubmissionStatus> GetSubmissionAsync(int submissionId, CancellationToken ct = default)
@@ -261,7 +271,8 @@ public sealed record DocuSealSubmissionResult(
     int SubmissionId,
     string SellerSigningUrl,
     string SellerEmail,
-    string Status);
+    string Status,
+    bool EmailSentByDocuSeal = false);
 
 public sealed record DocuSealSubmissionStatus(
     int SubmissionId,

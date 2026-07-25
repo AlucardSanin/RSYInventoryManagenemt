@@ -1,6 +1,7 @@
 @inject VehicleInvoiceService Invoices
 @inject UiBusyService Busy
 @inject ToastService Toasts
+@inject IJSRuntime Js
 @using RSYInventory.Data.Entities
 @using RSYInventory.Web.Services.Invoice
 
@@ -115,31 +116,49 @@
                                 disabled="@(_busy || !CanSign)"
                                 title="@SignDisabledReason"
                                 @onclick="SendForSignatureAsync">
-                            @(_busySign ? "Enviando…" : "Enviar enlace de firma")
+                            @(_busySign ? "Generando…" : SignButtonLabel)
                         </button>
                     }
 
                     <button type="button" class="btn btn-link" @onclick="Close" disabled="@_busy">Cerrar</button>
                 </div>
 
-                @if (!string.IsNullOrWhiteSpace(_signUrl))
+                @if (!string.IsNullOrWhiteSpace(_signUrl) && !_result.IsSigned)
                 {
-                    <p class="invoice-dialog__hint">
-                        Enlace de firma del vendedor:
-                        <a href="@_signUrl" target="_blank" rel="noopener">@_signUrl</a>
-                    </p>
+                    <div class="invoice-dialog__sign-link">
+                        <p class="invoice-dialog__sign-link-title">Enlace de firma del vendedor</p>
+                        <p class="invoice-dialog__sign-link-help">
+                            Comparte este enlace (WhatsApp, SMS o en persona). Firmar el PDF descargado no registra la firma en el sistema.
+                        </p>
+                        <div class="invoice-dialog__sign-link-row">
+                            <input class="form-control form-control-sm mono"
+                                   readonly
+                                   value="@_signUrl"
+                                   onclick="this.select()" />
+                            <button type="button"
+                                    class="btn btn-sm btn-primary"
+                                    disabled="@_busy"
+                                    @onclick="CopySignUrlAsync">
+                                @(_copied ? "Copiado" : "Copiar")
+                            </button>
+                            <a class="btn btn-sm btn-outline-secondary"
+                               href="@_signUrl"
+                               target="_blank"
+                               rel="noopener">Abrir</a>
+                        </div>
+                    </div>
                 }
 
                 @if (!Invoices.CanEmail)
                 {
                     <p class="invoice-dialog__hint">
-                        Configura <code>Smtp</code> (Enabled, Host, UserName, Password) para habilitar el envío por correo.
+                        Configura <code>Smtp</code> para enviar el recibo firmado por correo cuando el vendedor tenga email.
                     </p>
                 }
-                else if (string.IsNullOrWhiteSpace(_result.Vehicle.SellerEmail))
+                else if (string.IsNullOrWhiteSpace(_result.Vehicle.SellerEmail) && !_result.IsSigned)
                 {
                     <p class="invoice-dialog__hint">
-                        Este vehículo no tiene correo del vendedor; puedes descargar el PDF o agregar el correo en la edición.
+                        Sin correo del vendedor: genera el enlace de firma y compártelo manualmente. El PDF solo no sirve para firmar.
                     </p>
                 }
                 else if (!_result.IsSigned)
@@ -170,6 +189,7 @@
     private bool _busyEmail;
     private bool _busySign;
     private bool _busyRefresh;
+    private bool _copied;
     private Step _step = Step.Loading;
     private int _vehicleId;
     private string? _error;
@@ -196,7 +216,7 @@
         Step.Loading => "Cargando…",
         _ => _result?.IsSigned == true
             ? "Recibo firmado. Puedes descargarlo o enviarlo por correo."
-            : "Revisa el acuse y envía el enlace de firma al vendedor."
+            : "Revisa el acuse y genera el enlace de firma (por correo o para compartir)."
     };
 
     private string StatusLabel =>
@@ -219,8 +239,15 @@
 
     private bool CanSign =>
         _result is { IsSigned: false }
-        && Invoices.CanSendForSignature
-        && !string.IsNullOrWhiteSpace(_result.Vehicle.SellerEmail);
+        && Invoices.CanSendForSignature;
+
+    private bool HasSellerEmail =>
+        _result is not null && !string.IsNullOrWhiteSpace(_result.Vehicle.SellerEmail);
+
+    private string SignButtonLabel =>
+        HasSellerEmail && Invoices.CanEmail
+            ? "Enviar enlace de firma"
+            : "Generar enlace de firma";
 
     private string EmailDisabledReason
     {
@@ -242,11 +269,11 @@
         get
         {
             if (_result is null) return string.Empty;
-            if (string.IsNullOrWhiteSpace(_result.Vehicle.SellerEmail))
-                return "No hay correo del vendedor en este vehículo.";
             if (!Invoices.CanSendForSignature)
                 return "DocuSeal no está configurado.";
-            return "Crear enlace de firma y enviarlo por correo";
+            return HasSellerEmail && Invoices.CanEmail
+                ? "Crear enlace de firma y enviarlo por correo"
+                : "Crear enlace de firma para compartir (WhatsApp / en persona)";
         }
     }
 
@@ -256,6 +283,7 @@
         _error = null;
         _info = null;
         _signUrl = null;
+        _copied = false;
         _result = null;
         _adminPassword = string.Empty;
         _step = Step.Loading;
@@ -372,15 +400,23 @@
     {
         if (_result is null || _busy || !CanSign) return;
         _error = null;
+        _copied = false;
         _busy = _busySign = true;
         try
         {
             var sign = await Invoices.SendSigningLinkAsync(_result);
             _signUrl = sign.SellerSigningUrl;
             _result = await Invoices.TryLoadExistingAsync(_vehicleId) ?? _result;
-            _info = Invoices.CanEmail
-                ? $"Enlace de firma enviado a {_result.Vehicle.SellerEmail} (DocuSeal #{sign.SubmissionId})."
-                : $"Enlace DocuSeal #{sign.SubmissionId} creado. SMTP no está configurado; copia el enlace abajo.";
+
+            if (HasSellerEmail && Invoices.CanEmail)
+            {
+                _info = $"Enlace de firma enviado a {_result.Vehicle.SellerEmail} (DocuSeal #{sign.SubmissionId}). También puedes copiarlo abajo.";
+            }
+            else
+            {
+                _info = $"Enlace de firma listo (DocuSeal #{sign.SubmissionId}). Cópialo y compártelo con el vendedor; el PDF descargado no registra la firma.";
+            }
+
             Toasts.Success(_info);
         }
         catch (Exception ex)
@@ -391,6 +427,23 @@
         finally
         {
             _busy = _busySign = false;
+        }
+    }
+
+    private async Task CopySignUrlAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_signUrl)) return;
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", _signUrl);
+            _copied = true;
+            Toasts.Success("Enlace de firma copiado.");
+            await Task.Delay(2000);
+            _copied = false;
+        }
+        catch
+        {
+            Toasts.Error("No se pudo copiar. Selecciona el enlace y cópialo manualmente.");
         }
     }
 

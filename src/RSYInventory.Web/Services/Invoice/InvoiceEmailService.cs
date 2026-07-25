@@ -48,9 +48,10 @@ public sealed class InvoiceEmailService
             Text = $"""
                 Hello{(string.IsNullOrWhiteSpace(toName) ? "" : $" {toName.Trim()}")},
 
-                Attached is the signed Vehicle Purchase Acknowledgement #{invoiceNumber} for the vehicle you sold to Rodriguez Salvage Yard, CORP.
+                Please find attached the signed Vehicle Purchase Acknowledgement #{invoiceNumber}
+                for the vehicle purchased by Rodriguez Salvage Yard, CORP.
 
-                Please keep a copy for your records.
+                Keep this copy for your records.
 
                 Thank you,
                 Rodriguez Salvage Yard
@@ -111,21 +112,21 @@ public sealed class InvoiceEmailService
         message.To.Add(new MailboxAddress(
             string.IsNullOrWhiteSpace(toName) ? toEmail.Trim() : toName.Trim(),
             toEmail.Trim()));
-        message.Subject = $"Firma el acuse de compra #{invoiceNumber} — Rodriguez Salvage Yard";
+        message.Subject = $"Please sign Vehicle Purchase Acknowledgement #{invoiceNumber} — Rodriguez Salvage Yard";
 
         message.Body = new TextPart("plain")
         {
             Text = $"""
-                Hola{(string.IsNullOrWhiteSpace(toName) ? "" : $" {toName.Trim()}")},
+                Hello{(string.IsNullOrWhiteSpace(toName) ? "" : $" {toName.Trim()}")},
 
-                Rodriguez Salvage Yard necesita tu firma en el acuse de compra #{invoiceNumber}.
+                Rodriguez Salvage Yard needs your signature on Vehicle Purchase Acknowledgement #{invoiceNumber}.
 
-                Abre este enlace para firmar electrónicamente:
+                Open this link to sign electronically:
                 {signingUrl.Trim()}
 
-                Si el enlace no abre, cópialo y pégalo en tu navegador.
+                If the link does not open, copy and paste it into your browser.
 
-                Gracias,
+                Thank you,
                 Rodriguez Salvage Yard
                 """
         };

@@ -1096,6 +1096,40 @@ code, .mono {
     background: #fff;
 }
 
+.invoice-dialog__sign-link {
+    position: relative;
+    z-index: 2;
+    margin: 0;
+    padding: 0.85rem 1.15rem 1rem;
+    border-top: 1px solid #e8eef4;
+    background: #f4f8f9;
+}
+
+.invoice-dialog__sign-link-title {
+    margin: 0 0 0.25rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #1f424c;
+}
+
+.invoice-dialog__sign-link-help {
+    margin: 0 0 0.65rem;
+    font-size: 0.8rem;
+    color: var(--rsy-muted);
+}
+
+.invoice-dialog__sign-link-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    align-items: center;
+}
+
+.invoice-dialog__sign-link-row .form-control {
+    flex: 1 1 14rem;
+    min-width: 0;
+}
+
 .invoice-template-list {
     display: grid;
     gap: 0.65rem;
