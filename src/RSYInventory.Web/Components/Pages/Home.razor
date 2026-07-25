@@ -9,9 +9,12 @@
 
 @if (!CurrentUser.IsAuthenticated)
 {
-    <div class="page-panel">
-        <p class="mb-2">Debes iniciar sesión para trabajar en la yarda.</p>
-        <a class="btn btn-primary" href="login">Iniciar sesión</a>
+    <div class="page-panel mb-3">
+        <p class="mb-2">Puedes consultar piezas disponibles sin cuenta, o iniciar sesión para trabajar en la yarda.</p>
+        <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-primary" href="buscar">Buscar inventario</a>
+            <a class="btn btn-outline-secondary" href="login">Iniciar sesión</a>
+        </div>
     </div>
 }
 else
@@ -58,12 +61,16 @@ else
             </a>
         }
 
-        @if (CurrentUser.CanAcquireVehicles || CurrentUser.CanEditInventory)
+        @if (CurrentUser.CanViewVehicles)
         {
             <a class="task-card" href="vehicles">
                 <p class="task-card__kicker">Vehículos</p>
-                <h2 class="task-card__title">Ubicar vehículos</h2>
-                <p class="task-card__text">Lista de adquisiciones y asignación de paleta.</p>
+                <h2 class="task-card__title">@(CurrentUser.CanEditInventory || CurrentUser.CanAcquireVehicles ? "Ubicar vehículos" : "Ver vehículos adquiridos")</h2>
+                <p class="task-card__text">
+                    @(CurrentUser.CanEditInventory || CurrentUser.CanAcquireVehicles
+                        ? "Lista de adquisiciones y asignación de paleta."
+                        : "Consulta la lista y el detalle de vehículos (solo lectura).")
+                </p>
                 <p class="task-card__cta">Ver vehículos →</p>
             </a>
         }

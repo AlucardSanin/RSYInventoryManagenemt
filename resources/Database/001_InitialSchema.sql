@@ -264,7 +264,7 @@ SET IDENTITY_INSERT dbo.VehicleSources ON;
 MERGE dbo.VehicleSources AS target
 USING (VALUES
     (1, N'Wheelzy',  1),
-    (2, N'Pebble',   1),
+    (2, N'Peddle',   1),
     (3, N'Facebook', 1),
     (4, N'Other',    1)
 ) AS source (Id, Name, IsActive)

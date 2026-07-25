@@ -1,0 +1,51 @@
+@* Numeric USD amount with a fixed $ prefix (numbers only; works inside EditForm). *@
+@using System.Globalization
+
+<div class="input-group money-input">
+    <span class="input-group-text money-input__prefix" aria-hidden="true">$</span>
+    <input id="@InputId"
+           type="number"
+           inputmode="decimal"
+           class="@FieldClass"
+           value="@DisplayValue"
+           placeholder="@Placeholder"
+           step="0.01"
+           min="0"
+           @onchange="OnChangeAsync" />
+</div>
+
+@code {
+    [Parameter] public decimal? Value { get; set; }
+    [Parameter] public EventCallback<decimal?> ValueChanged { get; set; }
+    [Parameter] public string? Placeholder { get; set; } = "0.00";
+    [Parameter] public string? CssClass { get; set; }
+    [Parameter] public string? InputId { get; set; }
+
+    private string FieldClass => string.IsNullOrWhiteSpace(CssClass)
+        ? "form-control"
+        : $"form-control {CssClass}";
+
+    private string DisplayValue => Value is null
+        ? string.Empty
+        : Value.Value.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private async Task OnChangeAsync(ChangeEventArgs e)
+    {
+        var text = e.Value?.ToString()?.Trim();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            await ValueChanged.InvokeAsync(null);
+            return;
+        }
+
+        if (decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var amount)
+            || decimal.TryParse(text, NumberStyles.Number, CultureInfo.CurrentCulture, out amount))
+        {
+            await ValueChanged.InvokeAsync(amount < 0 ? null : amount);
+            return;
+        }
+
+        // Keep previous value if parse fails.
+        await ValueChanged.InvokeAsync(Value);
+    }
+}

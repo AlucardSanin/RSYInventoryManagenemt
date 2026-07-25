@@ -5,6 +5,7 @@
 @inject MediaStorageService Media
 @inject ICurrentUserService CurrentUser
 @inject UiBusyService Busy
+@inject ToastService Toasts
 @inject NavigationManager Nav
 @using Microsoft.AspNetCore.Components.Forms
 
@@ -101,18 +102,46 @@ else if (_vehicle is not null && !_editing)
                     </div>
                     <div>
                         <dt>Precio de compra</dt>
-                        <dd>@(_vehicle.PurchasePrice is null ? "—" : _vehicle.PurchasePrice.Value.ToString("C2"))</dd>
+                        <dd>@UsdMoney.FormatOrDash(_vehicle.PurchasePrice)</dd>
                     </div>
                     <div>
                         <dt>Fuente</dt>
                         <dd>@(_vehicle.VehicleSource?.Name ?? "—")</dd>
                     </div>
                     <div>
+                        <dt>Lugar de obtención</dt>
+                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.AcquisitionLocation) ? "—" : _vehicle.AcquisitionLocation)</dd>
+                    </div>
+                    <div>
                         <dt>Fecha de adquisición</dt>
                         <dd>@_vehicle.AcquiredAt.ToString("yyyy-MM-dd")</dd>
                     </div>
                     <div>
-                        <dt>Ubicación</dt>
+                        <dt>Vendedor</dt>
+                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.SellerName) ? "—" : _vehicle.SellerName)</dd>
+                    </div>
+                    <div>
+                        <dt>Teléfono vendedor</dt>
+                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.SellerPhone) ? "—" : _vehicle.SellerPhone)</dd>
+                    </div>
+                    <div>
+                        <dt>Correo vendedor</dt>
+                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.SellerEmail) ? "—" : _vehicle.SellerEmail)</dd>
+                    </div>
+                    <div>
+                        <dt>Chofer que recogió</dt>
+                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.PickupDriver) ? "—" : _vehicle.PickupDriver)</dd>
+                    </div>
+                    <div>
+                        <dt>Método de pago</dt>
+                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.PaymentMethod) ? "—" : _vehicle.PaymentMethod)</dd>
+                    </div>
+                    <div>
+                        <dt>Recibo de compra</dt>
+                        <dd>@(_vehicle.InvoiceNumber is null ? "Sin generar" : $"#{_vehicle.InvoiceNumber}")</dd>
+                    </div>
+                    <div>
+                        <dt>Ubicación en yarda</dt>
                         <dd>
                             @if (_vehicle.Pallet is null)
                             {
@@ -135,6 +164,12 @@ else if (_vehicle is not null && !_editing)
                 </dl>
 
                 <div class="form-actions mt-3">
+                    @if (CurrentUser.CanEditVehicles)
+                    {
+                        <button type="button" class="btn btn-outline-primary" @onclick="GenerateInvoiceAsync" disabled="@Busy.IsBusy">
+                            @(_vehicle.InvoiceNumber is null ? "Generar recibo de compra" : $"Ver recibo #{_vehicle.InvoiceNumber}")
+                        </button>
+                    }
                     @if (CurrentUser.CanEditInventory || CurrentUser.CanManageZones)
                     {
                         <a class="btn btn-outline-primary" href="@($"vehicles/{Id}/assign")">
@@ -202,8 +237,8 @@ else if (_vehicle is not null && _editing)
                     <InputNumber class="form-control" @bind-Value="_edit.Mileage" />
                 </div>
                 <div class="col-md-3">
-                    <label class="form-label">Precio de compra</label>
-                    <InputNumber class="form-control" @bind-Value="_edit.PurchasePrice" />
+                    <label class="form-label" for="price-edit">Precio de compra (USD)</label>
+                    <UsdMoneyInput InputId="price-edit" @bind-Value="_edit.PurchasePrice" />
                 </div>
                 <div class="col-md-3">
                     <label class="form-label" for="trans-combo">Transmisión</label>
@@ -234,13 +269,59 @@ else if (_vehicle is not null && _editing)
                     <InputDate class="form-control" @bind-Value="_edit.AcquiredAt" />
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label">Agregar fotos</label>
-                    <InputFile class="form-control" OnChange="OnImagesSelected" accept=".jpg,.jpeg,.png,.webp,image/*" multiple />
-                    <div class="image-upload-hint">Se agregan a la galería existente (máx. 12 por vez).</div>
-                    @if (_pendingFiles.Count > 0)
+                    <label class="form-label">Lugar de obtención</label>
+                    <InputText class="form-control" @bind-Value="_edit.AcquisitionLocation" placeholder="Dirección o ciudad donde se recogió" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Nombre del vendedor</label>
+                    <InputText class="form-control" @bind-Value="_edit.SellerName" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Teléfono</label>
+                    <InputText class="form-control" @bind-Value="_edit.SellerPhone" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Correo</label>
+                    <InputText class="form-control" @bind-Value="_edit.SellerEmail" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Chofer que recogió</label>
+                    <InputText class="form-control" @bind-Value="_edit.PickupDriver" placeholder="Nombre del chofer" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Método de pago</label>
+                    <InputText class="form-control" @bind-Value="_edit.PaymentMethod" placeholder="Cash, Zelle, Check…" />
+                </div>
+                <div class="col-12">
+                    <label class="form-label">Fotos</label>
+                    @if (_editImages.Count > 0 || _pendingFiles.Count > 0)
                     {
-                        <div class="form-hint mt-1">@_pendingFiles.Count nueva(s)</div>
+                        <div class="edit-gallery">
+                            @foreach (var img in _editImages)
+                            {
+                                <div class="edit-gallery__item">
+                                    <img src="@MediaPaths.ToUrl(img.RelativePath)" alt="Foto" />
+                                    <button type="button"
+                                            class="edit-gallery__remove"
+                                            title="Eliminar foto"
+                                            disabled="@(_saving || Busy.IsBusy)"
+                                            @onclick="@(() => RemoveExistingImageAsync(img.Id))">×</button>
+                                </div>
+                            }
+                            @foreach (var pending in _pendingFiles)
+                            {
+                                <div class="edit-gallery__item edit-gallery__pending" title="@pending.Name">
+                                    Nueva
+                                </div>
+                            }
+                        </div>
                     }
+                    else
+                    {
+                        <div class="form-hint">Sin fotos todavía.</div>
+                    }
+                    <InputFile class="form-control mt-2" OnChange="OnImagesSelected" accept=".jpg,.jpeg,.png,.webp,image/*" multiple />
+                    <div class="image-upload-hint">Las nuevas se agregan a las existentes (máx. 12 por vez). Usa × para quitar una actual.</div>
                 </div>
                 <div class="col-12">
                     <label class="form-label">Observaciones</label>
@@ -259,6 +340,7 @@ else if (_vehicle is not null && _editing)
 }
 
 <ImageViewer @ref="_viewer" />
+<InvoicePreviewDialog @ref="_invoiceDialog" OnClosed="OnInvoiceClosedAsync" />
 
 @code {
     [Parameter] public int Id { get; set; }
@@ -288,8 +370,10 @@ else if (_vehicle is not null && _editing)
     private List<ComboOption> _modelOptions = [];
     private List<string> _images = [];
     private readonly List<IBrowserFile> _pendingFiles = [];
+    private List<VehicleImage> _editImages = [];
     private CancellationTokenSource? _modelLoadCts;
     private ImageViewer? _viewer;
+    private InvoicePreviewDialog? _invoiceDialog;
     private bool _editing;
     private bool _saving;
     private bool _loadingModels;
@@ -298,7 +382,7 @@ else if (_vehicle is not null && _editing)
     private string? _info;
     private string? _vinHint;
 
-    private bool CanEdit => CurrentUser.CanAcquireVehicles || CurrentUser.CanManageUsers;
+    private bool CanEdit => CurrentUser.CanEditVehicles;
     private string HeaderTitle => _vehicle is null
         ? "Vehículo"
         : string.IsNullOrWhiteSpace($"{_vehicle.Year} {_vehicle.Make} {_vehicle.Model}".Trim())
@@ -322,6 +406,14 @@ else if (_vehicle is not null && _editing)
         _error = null;
         _editing = false;
         _galleryIndex = 0;
+
+        if (!CurrentUser.CanViewVehicles)
+        {
+            _error = "No tiene permiso para ver vehículos.";
+            _vehicle = null;
+            return;
+        }
+
         try
         {
             await Busy.RunAsync(async () =>
@@ -333,7 +425,7 @@ else if (_vehicle is not null && _editing)
                     return;
                 }
 
-                _images = VehicleService.GetImagePaths(_vehicle).ToList();
+                _images = MediaPaths.ToUrls(VehicleService.GetImagePaths(_vehicle)).ToList();
             }, "Cargando vehículo…");
         }
         catch (Exception ex)
@@ -355,6 +447,7 @@ else if (_vehicle is not null && _editing)
         _info = null;
         _vinHint = null;
         _pendingFiles.Clear();
+        _editImages = [];
 
         _edit = new EditModel
         {
@@ -367,6 +460,12 @@ else if (_vehicle is not null && _editing)
             Mileage = _vehicle.Mileage,
             PurchasePrice = _vehicle.PurchasePrice,
             Observations = _vehicle.Observations,
+            AcquisitionLocation = _vehicle.AcquisitionLocation,
+            SellerName = _vehicle.SellerName,
+            SellerPhone = _vehicle.SellerPhone,
+            SellerEmail = _vehicle.SellerEmail,
+            PickupDriver = _vehicle.PickupDriver,
+            PaymentMethod = _vehicle.PaymentMethod,
             VehicleSourceId = _vehicle.VehicleSourceId,
             AcquiredAt = _vehicle.AcquiredAt
         };
@@ -375,6 +474,8 @@ else if (_vehicle is not null && _editing)
         {
             await Busy.RunAsync(async () =>
             {
+                _editImages = (await Vehicles.GetImagesForEditAsync(Id)).ToList();
+
                 var sources = await Vehicles.GetSourcesAsync();
                 _sourceOptions = sources.Select(s => new ComboOption(s.Id.ToString(), s.Name)).ToList();
                 // Keep current source visible even if inactive.
@@ -404,14 +505,40 @@ else if (_vehicle is not null && _editing)
     {
         _editing = false;
         _pendingFiles.Clear();
+        _editImages = [];
         _error = null;
         _vinHint = null;
     }
 
     private void OnImagesSelected(InputFileChangeEventArgs e)
     {
-        _pendingFiles.Clear();
-        _pendingFiles.AddRange(e.GetMultipleFiles(12));
+        // Append to pending new files (does not remove existing gallery photos).
+        var selected = e.GetMultipleFiles(12);
+        var room = Math.Max(0, 12 - _pendingFiles.Count);
+        if (room > 0)
+            _pendingFiles.AddRange(selected.Take(room));
+    }
+
+    private async Task RemoveExistingImageAsync(int imageId)
+    {
+        if (_saving || Busy.IsBusy || !CanEdit) return;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                await Vehicles.RemoveImageAsync(Id, imageId);
+                _editImages = (await Vehicles.GetImagesForEditAsync(Id)).ToList();
+                _vehicle = await Vehicles.GetByIdAsync(Id);
+                if (_vehicle is not null)
+                    _images = MediaPaths.ToUrls(VehicleService.GetImagePaths(_vehicle)).ToList();
+            }, "Eliminando foto…");
+            Toasts.Success("Foto eliminada.");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+            _error = ex.Message;
+        }
     }
 
     private async Task OnYearChangedAsync(string? value)
@@ -584,9 +711,16 @@ else if (_vehicle is not null && _editing)
                     _edit.PurchasePrice,
                     _edit.Observations,
                     _edit.VehicleSourceId,
-                    _edit.AcquiredAt);
+                    _edit.AcquiredAt,
+                    _edit.AcquisitionLocation,
+                    _edit.SellerName,
+                    _edit.SellerPhone,
+                    _edit.SellerEmail,
+                    _edit.PickupDriver,
+                    _edit.PaymentMethod);
 
                 var failed = 0;
+                string? lastImageError = null;
                 foreach (var file in _pendingFiles)
                 {
                     try
@@ -595,21 +729,32 @@ else if (_vehicle is not null && _editing)
                         var path = await Media.SaveAsync(stream, file.Name, "vehicles", Id, _edit.Make);
                         await Vehicles.AddImageAsync(Id, path);
                     }
-                    catch
+                    catch (Exception imgEx)
                     {
                         failed++;
+                        lastImageError = imgEx.Message;
                     }
                 }
 
                 _pendingFiles.Clear();
                 await LoadAsync();
-                _info = failed > 0
-                    ? $"Cambios guardados, pero {failed} foto(s) no se subieron."
-                    : "Cambios guardados.";
+                if (failed > 0)
+                {
+                    var detail = string.IsNullOrWhiteSpace(lastImageError) ? "" : $" ({lastImageError})";
+                    var msg = $"Cambios guardados, pero {failed} foto(s) no se subieron{detail}.";
+                    Toasts.Info(msg);
+                    _info = msg;
+                }
+                else
+                {
+                    Toasts.Success("Cambios guardados.");
+                    _info = "Cambios guardados.";
+                }
             }, "Guardando cambios…");
         }
         catch (Exception ex)
         {
+            Toasts.Error(ex.Message);
             _error = ex.Message;
             _editing = true;
         }
@@ -647,7 +792,33 @@ else if (_vehicle is not null && _editing)
         public int? Mileage { get; set; }
         public decimal? PurchasePrice { get; set; }
         public string? Observations { get; set; }
+        public string? AcquisitionLocation { get; set; }
+        public string? SellerName { get; set; }
+        public string? SellerPhone { get; set; }
+        public string? SellerEmail { get; set; }
+        public string? PickupDriver { get; set; }
+        public string? PaymentMethod { get; set; }
         public int VehicleSourceId { get; set; }
         public DateTime AcquiredAt { get; set; }
+    }
+
+    private async Task GenerateInvoiceAsync()
+    {
+        if (_vehicle is null || _invoiceDialog is null) return;
+        _error = null;
+        try
+        {
+            await _invoiceDialog.OpenAsync(_vehicle.Id);
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+            _error = ex.Message;
+        }
+    }
+
+    private async Task OnInvoiceClosedAsync()
+    {
+        await LoadAsync();
     }
 }

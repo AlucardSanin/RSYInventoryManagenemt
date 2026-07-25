@@ -5,6 +5,7 @@
 @inject VinLookupService VinLookup
 @inject MediaStorageService Media
 @inject UiBusyService Busy
+@inject ToastService Toasts
 @inject NavigationManager Nav
 @using Microsoft.AspNetCore.Components.Forms
 
@@ -778,18 +779,24 @@
                         await using var stream = _imageFile.OpenReadStream(maxAllowedSize: 8 * 1024 * 1024);
                         var path = await Media.SaveAsync(stream, _imageFile.Name, "parts", created.Id, _model.Brand);
                         await Inventory.SetImagePathAsync(created.Id, path);
+                        Toasts.Success("Pieza registrada.");
                     }
                     catch (Exception imgEx)
                     {
-                        _info = $"Pieza guardada, pero la foto falló: {imgEx.Message}";
+                        Toasts.Info($"Pieza guardada, pero la foto falló: {imgEx.Message}");
                     }
                 }
-
-                Nav.NavigateTo("inventory");
+                else
+                {
+                    Toasts.Success("Pieza registrada.");
+                }
             }, "Guardando pieza…");
+
+            Nav.NavigateTo("inventory");
         }
         catch (Exception ex)
         {
+            Toasts.Error(ex.Message);
             _error = ex.Message;
         }
         finally

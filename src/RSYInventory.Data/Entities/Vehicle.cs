@@ -25,6 +25,40 @@ public partial class Vehicle
     /// <summary>Optional acquisition purchase price.</summary>
     public decimal? PurchasePrice { get; set; }
 
+    /// <summary>Where the vehicle was obtained / picked up (address or place).</summary>
+    public string? AcquisitionLocation { get; set; }
+
+    public string? SellerName { get; set; }
+
+    public string? SellerPhone { get; set; }
+
+    public string? SellerEmail { get; set; }
+
+    /// <summary>Driver who picked up / collected the vehicle.</summary>
+    public string? PickupDriver { get; set; }
+
+    /// <summary>How the purchase was paid (Cash, Zelle, Check, etc.).</summary>
+    public string? PaymentMethod { get; set; }
+
+    /// <summary>Purchase invoice number (assigned on first generate; starts at 1000).</summary>
+    public int? InvoiceNumber { get; set; }
+
+    public DateTime? InvoiceIssuedAtUtc { get; set; }
+
+    public int? InvoiceTemplateId { get; set; }
+
+    public int? DocuSealSubmissionId { get; set; }
+
+    public string? SellerSigningUrl { get; set; }
+
+    public string? UnsignedPdfRelativePath { get; set; }
+
+    public string? SignedPdfRelativePath { get; set; }
+
+    public DateTime? SignatureSentAtUtc { get; set; }
+
+    public DateTime? SignedAtUtc { get; set; }
+
     public string? Observations { get; set; }
 
     public int VehicleSourceId { get; set; }

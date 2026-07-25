@@ -36,6 +36,16 @@ public sealed class DatabaseCurrentUserService : ICurrentUserService
     public bool CanAcquireVehicles => HasRole(AppRole.VehicleAcquirer)
                                       || CanEditInventory;
 
+    /// <summary>
+    /// Inventory viewers (and anyone who can acquire/edit) can open the vehicle list and detail pages.
+    /// </summary>
+    public bool CanViewVehicles => CanViewInventory || CanAcquireVehicles || CanEditVehicles;
+
+    /// <summary>
+    /// Anyone who can acquire vehicles (or god) can edit vehicle details and manage photos.
+    /// </summary>
+    public bool CanEditVehicles => CanAcquireVehicles || CanManageUsers;
+
     public bool CanManageUsers => HasRole(AppRole.SystemAdmin);
 
     private CurrentUserSnapshot Require() =>

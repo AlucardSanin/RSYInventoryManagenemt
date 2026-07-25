@@ -58,6 +58,8 @@ public class VehicleService
 
     public async Task<List<Vehicle>> GetAllAsync(CancellationToken ct = default)
     {
+        EnsureCanViewVehicles();
+
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         return await db.Vehicles
             .AsNoTracking()
@@ -71,6 +73,8 @@ public class VehicleService
 
     public async Task<Vehicle?> GetByIdAsync(int id, CancellationToken ct = default)
     {
+        EnsureCanViewVehicles();
+
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         return await db.Vehicles
             .AsNoTracking()
@@ -79,6 +83,12 @@ public class VehicleService
             .Include(v => v.Images)
             .Include(v => v.Pallet)!.ThenInclude(p => p!.Row)!.ThenInclude(r => r!.Zone)
             .FirstOrDefaultAsync(v => v.Id == id, ct);
+    }
+
+    private void EnsureCanViewVehicles()
+    {
+        if (!_currentUser.CanViewVehicles)
+            throw new UnauthorizedAccessException("No tiene permiso para ver vehículos.");
     }
 
     public async Task<Vehicle> AcquireAsync(
@@ -93,6 +103,12 @@ public class VehicleService
         string? observations,
         int vehicleSourceId,
         DateTime acquiredAt,
+        string? acquisitionLocation = null,
+        string? sellerName = null,
+        string? sellerPhone = null,
+        string? sellerEmail = null,
+        string? pickupDriver = null,
+        string? paymentMethod = null,
         CancellationToken ct = default)
     {
         if (!_currentUser.CanAcquireVehicles && !_currentUser.CanEditInventory)
@@ -121,6 +137,12 @@ public class VehicleService
             Mileage = mileage,
             PurchasePrice = purchasePrice is null or <= 0 ? null : Math.Round(purchasePrice.Value, 2, MidpointRounding.AwayFromZero),
             Observations = observations,
+            AcquisitionLocation = NullIfWhiteSpace(acquisitionLocation),
+            SellerName = NullIfWhiteSpace(sellerName),
+            SellerPhone = NullIfWhiteSpace(sellerPhone),
+            SellerEmail = NullIfWhiteSpace(sellerEmail),
+            PickupDriver = NullIfWhiteSpace(pickupDriver),
+            PaymentMethod = NullIfWhiteSpace(paymentMethod),
             VehicleSourceId = vehicleSourceId,
             AcquiredAt = acquiredAt,
             AcquiredByUserId = _currentUser.UserId,
@@ -146,7 +168,7 @@ public class VehicleService
 
     public async Task SetImagePathAsync(int vehicleId, string? relativePath, CancellationToken ct = default)
     {
-        if (!_currentUser.CanAcquireVehicles && !_currentUser.CanEditInventory)
+        if (!_currentUser.CanEditVehicles)
             throw new UnauthorizedAccessException("No tiene permiso para actualizar vehículos.");
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -177,8 +199,8 @@ public class VehicleService
     /// <summary>Appends a photo to the vehicle gallery and keeps ImageRelativePath as the cover (first) image.</summary>
     public async Task AddImageAsync(int vehicleId, string relativePath, CancellationToken ct = default)
     {
-        if (!_currentUser.CanAcquireVehicles && !_currentUser.CanEditInventory)
-            throw new UnauthorizedAccessException("No tiene permiso para actualizar vehículos.");
+        if (!_currentUser.CanEditVehicles)
+            throw new UnauthorizedAccessException("No tiene permiso para agregar fotos al vehículo.");
 
         if (string.IsNullOrWhiteSpace(relativePath))
             throw new InvalidOperationException("Ruta de imagen inválida.");
@@ -190,6 +212,8 @@ public class VehicleService
             .Include(v => v.Images)
             .FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
             ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+        EnsureLegacyCoverInGallery(vehicle, db);
 
         if (vehicle.Images.Any(i => string.Equals(i.RelativePath, relativePath, StringComparison.OrdinalIgnoreCase)))
             return;
@@ -210,6 +234,47 @@ public class VehicleService
         await db.SaveChangesAsync(ct);
     }
 
+    /// <summary>Removes one gallery photo. Cover falls back to the next remaining image.</summary>
+    public async Task RemoveImageAsync(int vehicleId, int imageId, CancellationToken ct = default)
+    {
+        if (!_currentUser.CanEditVehicles)
+            throw new UnauthorizedAccessException("No tiene permiso para eliminar fotos del vehículo.");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var vehicle = await db.Vehicles
+            .Include(v => v.Images)
+            .FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+            ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+        EnsureLegacyCoverInGallery(vehicle, db);
+        await db.SaveChangesAsync(ct);
+
+        var image = vehicle.Images.FirstOrDefault(i => i.Id == imageId)
+            ?? throw new InvalidOperationException("Imagen no encontrada.");
+
+        var removedPath = image.RelativePath;
+        db.VehicleImages.Remove(image);
+        await db.SaveChangesAsync(ct);
+
+        // Reload remaining after delete.
+        var remaining = await db.VehicleImages
+            .Where(i => i.VehicleId == vehicleId)
+            .OrderBy(i => i.SortOrder)
+            .ThenBy(i => i.Id)
+            .ToListAsync(ct);
+
+        vehicle = await db.Vehicles.FirstAsync(v => v.Id == vehicleId, ct);
+        if (string.Equals(vehicle.ImageRelativePath, removedPath, StringComparison.OrdinalIgnoreCase)
+            || remaining.Count == 0
+            || !remaining.Any(i => string.Equals(i.RelativePath, vehicle.ImageRelativePath, StringComparison.OrdinalIgnoreCase)))
+        {
+            vehicle.ImageRelativePath = remaining.FirstOrDefault()?.RelativePath;
+        }
+
+        vehicle.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
     /// <summary>Ordered gallery paths (falls back to legacy ImageRelativePath when gallery is empty).</summary>
     public static IReadOnlyList<string> GetImagePaths(Vehicle vehicle)
     {
@@ -221,12 +286,53 @@ public class VehicleService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        if (fromGallery.Count > 0)
-            return fromGallery;
+        if (!string.IsNullOrWhiteSpace(vehicle.ImageRelativePath)
+            && !fromGallery.Any(p => string.Equals(p, vehicle.ImageRelativePath, StringComparison.OrdinalIgnoreCase)))
+        {
+            fromGallery.Insert(0, vehicle.ImageRelativePath!);
+        }
 
-        return string.IsNullOrWhiteSpace(vehicle.ImageRelativePath)
-            ? []
-            : [vehicle.ImageRelativePath];
+        return fromGallery;
+    }
+
+    /// <summary>Gallery rows for edit UI (ensures legacy cover appears as a removable item).</summary>
+    public async Task<IReadOnlyList<VehicleImage>> GetImagesForEditAsync(int vehicleId, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var vehicle = await db.Vehicles
+            .Include(v => v.Images)
+            .FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+            ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+        EnsureLegacyCoverInGallery(vehicle, db);
+        if (db.ChangeTracker.HasChanges())
+            await db.SaveChangesAsync(ct);
+
+        return vehicle.Images
+            .OrderBy(i => i.SortOrder)
+            .ThenBy(i => i.Id)
+            .ToList();
+    }
+
+    private static void EnsureLegacyCoverInGallery(Vehicle vehicle, YardInventoryDbContext db)
+    {
+        if (string.IsNullOrWhiteSpace(vehicle.ImageRelativePath))
+            return;
+
+        if (vehicle.Images.Any(i =>
+                string.Equals(i.RelativePath, vehicle.ImageRelativePath, StringComparison.OrdinalIgnoreCase)))
+            return;
+
+        var minOrder = vehicle.Images.Count == 0 ? 0 : vehicle.Images.Min(i => i.SortOrder) - 1;
+        var row = new VehicleImage
+        {
+            VehicleId = vehicle.Id,
+            RelativePath = vehicle.ImageRelativePath!,
+            SortOrder = minOrder,
+            CreatedAtUtc = DateTime.UtcNow
+        };
+        db.VehicleImages.Add(row);
+        vehicle.Images.Add(row);
     }
 
     public async Task UpdateAsync(
@@ -242,9 +348,15 @@ public class VehicleService
         string? observations,
         int vehicleSourceId,
         DateTime acquiredAt,
+        string? acquisitionLocation = null,
+        string? sellerName = null,
+        string? sellerPhone = null,
+        string? sellerEmail = null,
+        string? pickupDriver = null,
+        string? paymentMethod = null,
         CancellationToken ct = default)
     {
-        if (!_currentUser.CanAcquireVehicles && !_currentUser.CanManageUsers)
+        if (!_currentUser.CanEditVehicles)
             throw new UnauthorizedAccessException("No tiene permiso para editar vehículos.");
 
         vin = vin.Trim().ToUpperInvariant();
@@ -277,12 +389,173 @@ public class VehicleService
             ? null
             : Math.Round(purchasePrice.Value, 2, MidpointRounding.AwayFromZero);
         vehicle.Observations = string.IsNullOrWhiteSpace(observations) ? null : observations.Trim();
+        vehicle.AcquisitionLocation = NullIfWhiteSpace(acquisitionLocation);
+        vehicle.SellerName = NullIfWhiteSpace(sellerName);
+        vehicle.SellerPhone = NullIfWhiteSpace(sellerPhone);
+        vehicle.SellerEmail = NullIfWhiteSpace(sellerEmail);
+        vehicle.PickupDriver = NullIfWhiteSpace(pickupDriver);
+        vehicle.PaymentMethod = NullIfWhiteSpace(paymentMethod);
         vehicle.VehicleSourceId = vehicleSourceId;
         vehicle.AcquiredAt = acquiredAt;
         vehicle.UpdatedAtUtc = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
     }
+
+    /// <summary>Assigns the next invoice number (from 1000) if the vehicle has none yet.</summary>
+    public async Task<int> EnsureInvoiceNumberAsync(int vehicleId, CancellationToken ct = default)
+    {
+        if (!_currentUser.CanEditVehicles)
+            throw new UnauthorizedAccessException("No tiene permiso para generar recibos de compra.");
+
+        await using var strategyDb = await _dbFactory.CreateDbContextAsync(ct);
+        var strategy = strategyDb.Database.CreateExecutionStrategy();
+
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync(ct);
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+
+            var vehicle = await db.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+                ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+            if (vehicle.InvoiceNumber is > 0)
+            {
+                await tx.CommitAsync(ct);
+                return vehicle.InvoiceNumber.Value;
+            }
+
+            // Atomically take the next number from the sequence table.
+            // EF Core maps scalar SqlQuery results to a column named Value.
+            var assigned = await db.Database.SqlQueryRaw<int>(
+                    """
+                    UPDATE dbo.InvoiceSequence WITH (UPDLOCK, ROWLOCK)
+                    SET NextNumber = NextNumber + 1
+                    OUTPUT deleted.NextNumber AS [Value]
+                    WHERE Id = 1;
+                    """)
+                .ToListAsync(ct);
+
+            var number = assigned.FirstOrDefault();
+            if (number <= 0)
+                throw new InvalidOperationException("No se pudo asignar el número de factura. Ejecuta 011_VehicleInvoiceAndPayment.sql.");
+
+            vehicle.InvoiceNumber = number;
+            vehicle.InvoiceIssuedAtUtc = DateTime.UtcNow;
+            vehicle.UpdatedAtUtc = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+            return number;
+        });
+    }
+
+    public async Task SaveInvoiceDraftAsync(
+        int vehicleId,
+        int templateId,
+        string unsignedPdfRelativePath,
+        CancellationToken ct = default)
+    {
+        if (!_currentUser.CanEditVehicles)
+            throw new UnauthorizedAccessException("No tiene permiso para generar recibos de compra.");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var vehicle = await db.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+            ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+        vehicle.InvoiceTemplateId = templateId;
+        vehicle.UnsignedPdfRelativePath = unsignedPdfRelativePath;
+        vehicle.SignedPdfRelativePath = null;
+        vehicle.DocuSealSubmissionId = null;
+        vehicle.SellerSigningUrl = null;
+        vehicle.SignatureSentAtUtc = null;
+        vehicle.SignedAtUtc = null;
+        vehicle.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task UpdateUnsignedPdfPathAsync(
+        int vehicleId,
+        string unsignedPdfRelativePath,
+        CancellationToken ct = default)
+    {
+        if (!_currentUser.CanEditVehicles)
+            throw new UnauthorizedAccessException("No tiene permiso para actualizar recibos.");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var vehicle = await db.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+            ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+        vehicle.UnsignedPdfRelativePath = unsignedPdfRelativePath;
+        vehicle.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task SaveSignatureSentAsync(
+        int vehicleId,
+        int submissionId,
+        string sellerSigningUrl,
+        CancellationToken ct = default)
+    {
+        if (!_currentUser.CanEditVehicles)
+            throw new UnauthorizedAccessException("No tiene permiso para enviar enlaces de firma.");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var vehicle = await db.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+            ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+        vehicle.DocuSealSubmissionId = submissionId;
+        vehicle.SellerSigningUrl = sellerSigningUrl;
+        vehicle.SignatureSentAtUtc = DateTime.UtcNow;
+        vehicle.SignedAtUtc = null;
+        vehicle.SignedPdfRelativePath = null;
+        vehicle.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task SaveSignedInvoiceAsync(
+        int vehicleId,
+        string signedPdfRelativePath,
+        CancellationToken ct = default)
+    {
+        if (!_currentUser.CanEditVehicles)
+            throw new UnauthorizedAccessException("No tiene permiso para actualizar recibos firmados.");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var vehicle = await db.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+            ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+        vehicle.SignedPdfRelativePath = signedPdfRelativePath;
+        vehicle.SignedAtUtc = DateTime.UtcNow;
+        vehicle.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Clears signing artifacts so a new receipt can replace the previous one.
+    /// Keeps the existing invoice number.
+    /// </summary>
+    public async Task ClearInvoiceForRegenerateAsync(int vehicleId, CancellationToken ct = default)
+    {
+        if (!_currentUser.CanEditVehicles)
+            throw new UnauthorizedAccessException("No tiene permiso para regenerar recibos.");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var vehicle = await db.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+            ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+        vehicle.InvoiceTemplateId = null;
+        vehicle.DocuSealSubmissionId = null;
+        vehicle.SellerSigningUrl = null;
+        vehicle.UnsignedPdfRelativePath = null;
+        vehicle.SignedPdfRelativePath = null;
+        vehicle.SignatureSentAtUtc = null;
+        vehicle.SignedAtUtc = null;
+        vehicle.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static string? NullIfWhiteSpace(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     public async Task AssignLocationAsync(int vehicleId, int palletId, string? notes, CancellationToken ct = default)
     {

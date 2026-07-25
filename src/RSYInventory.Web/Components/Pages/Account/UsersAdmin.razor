@@ -274,7 +274,7 @@ else
 
     private static string RoleTitle(AppRole role) => role switch
     {
-        AppRole.InventoryViewer => "Solo ver inventario",
+        AppRole.InventoryViewer => "Solo ver inventario y vehículos",
         AppRole.InventoryEditor => "Editar inventario",
         AppRole.ZoneManager => "Gestionar zonas",
         AppRole.VehicleAcquirer => "Adquirir vehículos",
@@ -284,10 +284,10 @@ else
 
     private static string RoleHelp(AppRole role) => role switch
     {
-        AppRole.InventoryViewer => "Consulta piezas y ubicaciones; no modifica.",
+        AppRole.InventoryViewer => "Consulta piezas, ubicaciones y vehículos adquiridos; no modifica.",
         AppRole.InventoryEditor => "Alta, mover/vender piezas y ubicar vehículos.",
         AppRole.ZoneManager => "Crear y ajustar zonas, filas y paletas (incluye editar inventario).",
-        AppRole.VehicleAcquirer => "Registrar compras por VIN; no asigna paleta.",
+        AppRole.VehicleAcquirer => "Registrar/editar vehículos, fotos y recibos de compra; no asigna paleta.",
         AppRole.SystemAdmin => "Crear usuarios y asignar niveles de acceso.",
         _ => string.Empty
     };

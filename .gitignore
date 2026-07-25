@@ -23,6 +23,7 @@ Thumbs.db
 ## Secrets / local
 appsettings.*.local.json
 *.pfx
+src/RSYInventory.Web/dataprotection-keys/
 
 ## Uploaded media (keep folder structure)
 src/RSYInventory.Web/wwwroot/uploads/**

@@ -32,6 +32,8 @@ public partial class YardInventoryDbContext : DbContext
 
     public virtual DbSet<VehicleSource> VehicleSources { get; set; }
 
+    public virtual DbSet<InvoiceTemplate> InvoiceTemplates { get; set; }
+
     public virtual DbSet<Zone> Zones { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -189,6 +191,16 @@ public partial class YardInventoryDbContext : DbContext
             entity.Property(e => e.Model).HasMaxLength(100);
             entity.Property(e => e.Observations).HasMaxLength(2000);
             entity.Property(e => e.PurchasePrice).HasPrecision(12, 2);
+            entity.Property(e => e.AcquisitionLocation).HasMaxLength(200);
+            entity.Property(e => e.SellerName).HasMaxLength(150);
+            entity.Property(e => e.SellerPhone).HasMaxLength(40);
+            entity.Property(e => e.SellerEmail).HasMaxLength(256);
+            entity.Property(e => e.PickupDriver).HasMaxLength(150);
+            entity.Property(e => e.PaymentMethod).HasMaxLength(80);
+            entity.Property(e => e.InvoiceNumber);
+            entity.Property(e => e.SellerSigningUrl).HasMaxLength(500);
+            entity.Property(e => e.UnsignedPdfRelativePath).HasMaxLength(400);
+            entity.Property(e => e.SignedPdfRelativePath).HasMaxLength(400);
             entity.Property(e => e.Vin).HasMaxLength(17);
 
             entity.HasOne(d => d.AcquiredByUser).WithMany(p => p.Vehicles)
@@ -226,6 +238,24 @@ public partial class YardInventoryDbContext : DbContext
 
             entity.Property(e => e.IsActive).HasDefaultValue(true);
             entity.Property(e => e.Name).HasMaxLength(100);
+        });
+
+        modelBuilder.Entity<InvoiceTemplate>(entity =>
+        {
+            entity.Property(e => e.Name).HasMaxLength(120);
+            entity.Property(e => e.BuyerCompanyName).HasMaxLength(200);
+            entity.Property(e => e.BuyerAuthorizedName).HasMaxLength(200);
+            entity.Property(e => e.AddressLine1).HasMaxLength(200);
+            entity.Property(e => e.CityStateZip).HasMaxLength(120);
+            entity.Property(e => e.Email).HasMaxLength(200);
+            entity.Property(e => e.Phone).HasMaxLength(40);
+            entity.Property(e => e.PdfRelativePath).HasMaxLength(400);
+            entity.Property(e => e.LogoRelativePath).HasMaxLength(400);
+            entity.Property(e => e.MatchedSourceName).HasMaxLength(100);
+            entity.Property(e => e.TemplateKind).HasDefaultValue(0);
+            entity.Property(e => e.IsDefault).HasDefaultValue(false);
+            entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
         });
 
         modelBuilder.Entity<Zone>(entity =>

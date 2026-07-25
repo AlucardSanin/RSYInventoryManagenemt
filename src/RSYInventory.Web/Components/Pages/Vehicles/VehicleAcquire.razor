@@ -4,6 +4,7 @@
 @inject VinLookupService VinLookup
 @inject MediaStorageService Media
 @inject UiBusyService Busy
+@inject ToastService Toasts
 @inject NavigationManager Nav
 @using Microsoft.AspNetCore.Components.Forms
 
@@ -11,7 +12,7 @@
 
 <PageHeader Title="Registrar vehículo adquirido"
             Eyebrow="Vehículos"
-            Lead="Ingresa el VIN y decodifícalo para sugerir año, marca y modelo. Si no hay resultado, puedes completar esos campos a mano.">
+            Lead="VIN, datos del auto, de dónde salió y contacto del vendedor. En móvil el formulario va por pasos.">
     <a class="btn btn-outline-secondary" href="vehicles">Volver a vehículos</a>
 </PageHeader>
 
@@ -26,107 +27,187 @@
 
 <div class="page-panel">
     <EditForm Model="_model" OnValidSubmit="SaveAsync">
-        <div class="row g-3">
-            <div class="col-md-8">
-                <label class="form-label">VIN *</label>
-                <InputText class="form-control mono" @bind-Value="_model.Vin" maxlength="17" placeholder="17 caracteres" />
-            </div>
-            <div class="col-md-4 d-flex flex-column justify-content-end">
-                <button type="button" class="btn btn-outline-primary w-100" @onclick="DecodeVinAsync" disabled="@Busy.IsBusy">Decodificar VIN</button>
-                @if (!string.IsNullOrEmpty(_vinHint))
+        <div class="form-stepper" data-step="@_mobileStep">
+            <div class="form-stepper__progress" aria-hidden="true">
+                @for (var i = 1; i <= MobileStepCount; i++)
                 {
-                    <div class="vin-hint">@_vinHint</div>
+                    <span class="form-stepper__dot @(i == _mobileStep ? "is-active" : null) @(i < _mobileStep ? "is-done" : null)"></span>
                 }
+            </div>
+            <p class="form-stepper__label">Paso @_mobileStep de @MobileStepCount · @MobileStepTitle</p>
+
+            @* 1 · VIN *@
+            <div class="form-step @(_mobileStep == 1 ? "is-active" : null)">
+                <div class="row g-3">
+                    <div class="col-md-8">
+                        <label class="form-label">VIN *</label>
+                        <InputText class="form-control mono" @bind-Value="_model.Vin" maxlength="17" placeholder="17 caracteres" />
+                    </div>
+                    <div class="col-md-4 d-flex flex-column justify-content-end">
+                        <button type="button" class="btn btn-outline-primary w-100" @onclick="DecodeVinAsync" disabled="@Busy.IsBusy">Decodificar VIN</button>
+                        @if (!string.IsNullOrEmpty(_vinHint))
+                        {
+                            <div class="vin-hint">@_vinHint</div>
+                        }
+                    </div>
+                </div>
             </div>
 
-            <div class="col-md-3">
-                <label class="form-label" for="year-combo">Año</label>
-                <SearchableCombo InputId="year-combo"
-                                 Value="@YearValue"
-                                 ValueChanged="OnYearChangedAsync"
-                                 Options="_yearOptions"
-                                 Placeholder="Escribe 201… o elige"
-                                 EmptyHint="Elige un año de la lista"
-                                 AllowCustom="false"
-                                 MaxSuggestions="@VehicleYearCatalog.DropdownVisibleCount" />
+            @* 2 · Identificación del vehículo *@
+            <div class="form-step @(_mobileStep == 2 ? "is-active" : null)">
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label" for="year-combo">Año</label>
+                        <SearchableCombo InputId="year-combo"
+                                         Value="@YearValue"
+                                         ValueChanged="OnYearChangedAsync"
+                                         Options="_yearOptions"
+                                         Placeholder="Escribe 201… o elige"
+                                         EmptyHint="Elige un año de la lista"
+                                         AllowCustom="false"
+                                         MaxSuggestions="@VehicleYearCatalog.DropdownVisibleCount" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label" for="make-combo">Marca</label>
+                        <SearchableCombo InputId="make-combo"
+                                         Value="@_model.Make"
+                                         ValueChanged="OnMakeChangedAsync"
+                                         Options="_makeOptions"
+                                         Placeholder="@(_model.Year is null ? "Primero elige un año" : "Escribe M… o elige")"
+                                         EmptyHint="@(_model.Year is null ? "Primero elige un año" : "Escribe para filtrar marcas")"
+                                         Disabled="@(_model.Year is null)"
+                                         AllowCustom="true" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label" for="model-combo">Modelo</label>
+                        <SearchableCombo InputId="model-combo"
+                                         @bind-Value="_model.Model"
+                                         Options="_modelOptions"
+                                         Placeholder="@ModelPlaceholder"
+                                         EmptyHint="@ModelEmptyHint"
+                                         Disabled="@string.IsNullOrWhiteSpace(_model.Make)"
+                                         AllowCustom="true"
+                                         MaxSuggestions="50" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Millas <span class="form-hint">(opcional)</span></label>
+                        <InputNumber class="form-control" @bind-Value="_model.Mileage" placeholder="Ej. 85000" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="trans-combo">Transmisión</label>
+                        <SearchableCombo InputId="trans-combo"
+                                         Value="@TransmissionValue"
+                                         ValueChanged="OnTransmissionChangedAsync"
+                                         Options="_transmissionOptions"
+                                         Placeholder="Automática o manual"
+                                         AllowCustom="false" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="drive-combo">Tracción</label>
+                        <SearchableCombo InputId="drive-combo"
+                                         Value="@DriveValue"
+                                         ValueChanged="OnDriveChangedAsync"
+                                         Options="_driveOptions"
+                                         Placeholder="FWD, RWD, AWD…"
+                                         AllowCustom="false" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" for="price-input">Precio de compra <span class="form-hint">(USD)</span></label>
+                        <UsdMoneyInput InputId="price-input" @bind-Value="_model.PurchasePrice" Placeholder="2500.00" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Método de pago <span class="form-hint">(opcional)</span></label>
+                        <InputText class="form-control" @bind-Value="_model.PaymentMethod" placeholder="Cash, Zelle, Check…" />
+                    </div>
+                </div>
             </div>
-            <div class="col-md-3">
-                <label class="form-label" for="make-combo">Marca</label>
-                <SearchableCombo InputId="make-combo"
-                                 Value="@_model.Make"
-                                 ValueChanged="OnMakeChangedAsync"
-                                 Options="_makeOptions"
-                                 Placeholder="@(_model.Year is null ? "Primero elige un año" : "Escribe M… o elige")"
-                                 EmptyHint="@(_model.Year is null ? "Primero elige un año" : "Escribe para filtrar marcas")"
-                                 Disabled="@(_model.Year is null)"
-                                 AllowCustom="true" />
+
+            @* 3 · Fuente y lugar *@
+            <div class="form-step @(_mobileStep == 3 ? "is-active" : null)">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label" for="source-combo">Fuente *</label>
+                        <SearchableCombo InputId="source-combo"
+                                         Value="@SourceValue"
+                                         ValueChanged="OnSourceChangedAsync"
+                                         Options="_sourceOptions"
+                                         Placeholder="Wheelzy, Peddle…"
+                                         AllowCustom="false" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Fecha de adquisición *</label>
+                        <InputDate class="form-control" @bind-Value="_model.AcquiredAt" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Lugar de obtención</label>
+                        <InputText class="form-control" @bind-Value="_model.AcquisitionLocation" placeholder="Dirección o ciudad donde se recogió" />
+                    </div>
+                </div>
             </div>
-            <div class="col-md-3">
-                <label class="form-label" for="model-combo">Modelo</label>
-                <SearchableCombo InputId="model-combo"
-                                 @bind-Value="_model.Model"
-                                 Options="_modelOptions"
-                                 Placeholder="@ModelPlaceholder"
-                                 EmptyHint="@ModelEmptyHint"
-                                 Disabled="@string.IsNullOrWhiteSpace(_model.Make)"
-                                 AllowCustom="true"
-                                 MaxSuggestions="50" />
+
+            @* 4 · Vendedor y chofer *@
+            <div class="form-step @(_mobileStep == 4 ? "is-active" : null)">
+                <div class="row g-3">
+                    <div class="col-12">
+                        <p class="form-hint mb-0">Contacto del vendedor y quién recogió el vehículo (opcionales).</p>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Nombre del vendedor</label>
+                        <InputText class="form-control" @bind-Value="_model.SellerName" placeholder="Nombre completo" autocomplete="name" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Teléfono</label>
+                        <InputText class="form-control" @bind-Value="_model.SellerPhone" placeholder="Ej. 787-555-0100" autocomplete="tel" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Correo</label>
+                        <InputText class="form-control" @bind-Value="_model.SellerEmail" placeholder="correo@ejemplo.com" autocomplete="email" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Chofer que recogió</label>
+                        <InputText class="form-control" @bind-Value="_model.PickupDriver" placeholder="Nombre del chofer" />
+                    </div>
+                </div>
             </div>
-            <div class="col-md-3">
-                <label class="form-label">Millas <span class="form-hint">(opcional)</span></label>
-                <InputNumber class="form-control" @bind-Value="_model.Mileage" placeholder="Ej. 85000" />
+
+            @* 5 · Fotos y notas *@
+            <div class="form-step @(_mobileStep == 5 ? "is-active" : null)">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Fotos <span class="form-hint">(opcional)</span></label>
+                        <InputFile class="form-control" OnChange="OnImagesSelected" accept=".jpg,.jpeg,.png,.webp,image/*" multiple />
+                        <div class="image-upload-hint">JPG/PNG/WEBP · puedes seleccionar varias.</div>
+                        @if (_imageFiles.Count > 0)
+                        {
+                            <div class="form-hint mt-1">@_imageFiles.Count foto(s): @string.Join(", ", _imageFiles.Select(f => f.Name))</div>
+                        }
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Observaciones <span class="form-hint">(opcional)</span></label>
+                        <InputTextArea class="form-control" @bind-Value="_model.Observations" rows="3" />
+                    </div>
+                </div>
             </div>
-            <div class="col-md-3">
-                <label class="form-label">Precio de compra <span class="form-hint">(opcional)</span></label>
-                <InputNumber class="form-control" @bind-Value="_model.PurchasePrice" placeholder="Ej. 2500.00" />
-            </div>
-            <div class="col-md-4">
-                <label class="form-label" for="trans-combo">Transmisión</label>
-                <SearchableCombo InputId="trans-combo"
-                                 Value="@TransmissionValue"
-                                 ValueChanged="OnTransmissionChangedAsync"
-                                 Options="_transmissionOptions"
-                                 Placeholder="Automática o manual"
-                                 AllowCustom="false" />
-            </div>
-            <div class="col-md-4">
-                <label class="form-label" for="drive-combo">Tracción</label>
-                <SearchableCombo InputId="drive-combo"
-                                 Value="@DriveValue"
-                                 ValueChanged="OnDriveChangedAsync"
-                                 Options="_driveOptions"
-                                 Placeholder="FWD, RWD, AWD…"
-                                 AllowCustom="false" />
-            </div>
-            <div class="col-md-4">
-                <label class="form-label" for="source-combo">Fuente *</label>
-                <SearchableCombo InputId="source-combo"
-                                 Value="@SourceValue"
-                                 ValueChanged="OnSourceChangedAsync"
-                                 Options="_sourceOptions"
-                                 Placeholder="Buscar fuente…"
-                                 AllowCustom="false" />
-            </div>
-            <div class="col-md-4">
-                <label class="form-label">Fecha de adquisición *</label>
-                <InputDate class="form-control" @bind-Value="_model.AcquiredAt" />
-            </div>
-            <div class="col-md-4">
-                <label class="form-label">Fotos <span class="form-hint">(opcional)</span></label>
-                <InputFile class="form-control" OnChange="OnImagesSelected" accept=".jpg,.jpeg,.png,.webp,image/*" multiple />
-                <div class="image-upload-hint">JPG/PNG/WEBP · puedes seleccionar varias.</div>
-                @if (_imageFiles.Count > 0)
+
+            <div class="form-stepper__nav">
+                @if (_mobileStep > 1)
                 {
-                    <div class="form-hint mt-1">@_imageFiles.Count foto(s): @string.Join(", ", _imageFiles.Select(f => f.Name))</div>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="PreviousStep" disabled="@Busy.IsBusy">Atrás</button>
                 }
-            </div>
-            <div class="col-md-8">
-                <label class="form-label">Observaciones <span class="form-hint">(opcional)</span></label>
-                <InputTextArea class="form-control" @bind-Value="_model.Observations" rows="2" />
+                @if (_mobileStep < MobileStepCount)
+                {
+                    <button type="button" class="btn btn-primary" @onclick="NextStep" disabled="@Busy.IsBusy">Siguiente</button>
+                }
+                else
+                {
+                    <button type="submit" class="btn btn-primary" disabled="@(_saving || Busy.IsBusy)">
+                        @(_saving ? "Guardando…" : "Guardar adquisición")
+                    </button>
+                }
             </div>
         </div>
 
-        <div class="form-actions">
+        <div class="form-actions form-actions--desktop">
             <button type="submit" class="btn btn-primary" disabled="@(_saving || Busy.IsBusy)">
                 @(_saving ? "Guardando…" : "Guardar adquisición")
             </button>
@@ -135,7 +216,11 @@
     </EditForm>
 </div>
 
+<InvoicePreviewDialog @ref="_invoiceDialog" OnClosed="OnInvoiceClosed" />
+
 @code {
+    private const int MobileStepCount = 5;
+
     private static readonly IReadOnlyList<ComboOption> _transmissionOptions =
     [
         new(((int)TransmissionType.Automatic).ToString(), "Automática"),
@@ -165,12 +250,24 @@
     private string? _info;
     private string? _vinHint;
     private bool _saving;
+    private int _mobileStep = 1;
     private readonly List<IBrowserFile> _imageFiles = [];
+    private InvoicePreviewDialog? _invoiceDialog;
+    private int? _pendingInvoiceVehicleId;
 
     private string? YearValue => _model.Year?.ToString();
     private string? TransmissionValue => _model.TransmissionType is null ? null : ((int)_model.TransmissionType.Value).ToString();
     private string? DriveValue => _model.DriveType is null ? null : ((int)_model.DriveType.Value).ToString();
     private string? SourceValue => _model.VehicleSourceId <= 0 ? null : _model.VehicleSourceId.ToString();
+
+    private string MobileStepTitle => _mobileStep switch
+    {
+        1 => "VIN",
+        2 => "Datos del vehículo",
+        3 => "Fuente y lugar",
+        4 => "Vendedor y chofer",
+        _ => "Fotos y notas"
+    };
 
     private string ModelPlaceholder =>
         _model.Year is null ? "Primero elige un año"
@@ -205,6 +302,41 @@
     }
 
     public void Dispose() => _modelLoadCts?.Cancel();
+
+    private void PreviousStep()
+    {
+        _error = null;
+        if (_mobileStep > 1) _mobileStep--;
+    }
+
+    private void NextStep()
+    {
+        _error = null;
+        if (!ValidateCurrentStep(out var message))
+        {
+            _error = message;
+            return;
+        }
+
+        if (_mobileStep < MobileStepCount)
+            _mobileStep++;
+    }
+
+    private bool ValidateCurrentStep(out string? message)
+    {
+        message = null;
+        switch (_mobileStep)
+        {
+            case 1 when string.IsNullOrWhiteSpace(_model.Vin):
+                message = "Ingresa el VIN del vehículo.";
+                return false;
+            case 3 when _model.VehicleSourceId <= 0:
+                message = "Selecciona la fuente (Wheelzy, Peddle, etc.).";
+                return false;
+            default:
+                return true;
+        }
+    }
 
     private void OnImagesSelected(InputFileChangeEventArgs e)
     {
@@ -268,7 +400,6 @@
         }
         catch (OperationCanceledException)
         {
-            // Newer make keystroke superseded this load.
         }
     }
 
@@ -286,28 +417,12 @@
         try
         {
             List<string> fromDb = [];
-            try
-            {
-                fromDb = await Vehicles.GetDistinctModelsAsync(make, ct);
-            }
-            catch
-            {
-                // Keep going with NHTSA / free text.
-            }
+            try { fromDb = await Vehicles.GetDistinctModelsAsync(make, ct); } catch { }
 
             IReadOnlyList<string> fromApi = [];
-            try
-            {
-                fromApi = await VinLookup.GetModelsForMakeAsync(make, _model.Year, ct);
-            }
-            catch
-            {
-                fromApi = [];
-            }
+            try { fromApi = await VinLookup.GetModelsForMakeAsync(make, _model.Year, ct); } catch { fromApi = []; }
 
-            // Prefer year-filtered API list when available so out-of-year models stay out.
             IEnumerable<string> mergedSource = fromApi.Count > 0 ? fromApi : fromDb;
-
             var merged = mergedSource
                 .Where(m => !string.IsNullOrWhiteSpace(m))
                 .Select(m => m.Trim())
@@ -425,6 +540,8 @@
         {
             await Busy.RunAsync(async () =>
             {
+                if (string.IsNullOrWhiteSpace(_model.Vin))
+                    throw new InvalidOperationException("Ingresa el VIN.");
                 if (_model.VehicleSourceId <= 0)
                     throw new InvalidOperationException("Seleccione una fuente.");
 
@@ -439,11 +556,18 @@
                     _model.PurchasePrice,
                     _model.Observations,
                     _model.VehicleSourceId,
-                    _model.AcquiredAt);
+                    _model.AcquiredAt,
+                    _model.AcquisitionLocation,
+                    _model.SellerName,
+                    _model.SellerPhone,
+                    _model.SellerEmail,
+                    _model.PickupDriver,
+                    _model.PaymentMethod);
 
                 if (_imageFiles.Count > 0)
                 {
                     var failed = 0;
+                    string? lastImageError = null;
                     foreach (var file in _imageFiles)
                     {
                         try
@@ -452,27 +576,48 @@
                             var path = await Media.SaveAsync(stream, file.Name, "vehicles", created.Id, _model.Make);
                             await Vehicles.AddImageAsync(created.Id, path);
                         }
-                        catch
+                        catch (Exception imgEx)
                         {
                             failed++;
+                            lastImageError = imgEx.Message;
                         }
                     }
 
                     if (failed > 0)
-                        _info = $"Vehículo guardado, pero {failed} foto(s) no se pudieron subir.";
+                    {
+                        var detail = string.IsNullOrWhiteSpace(lastImageError) ? "" : $" ({lastImageError})";
+                        Toasts.Info($"Vehículo guardado, pero {failed} foto(s) no se pudieron subir{detail}.");
+                    }
+                    else
+                        Toasts.Success("Vehículo registrado.");
+                }
+                else
+                {
+                    Toasts.Success("Vehículo registrado.");
                 }
 
-                Nav.NavigateTo("vehicles");
+                _pendingInvoiceVehicleId = created.Id;
             }, "Guardando adquisición…");
+
+            if (_pendingInvoiceVehicleId is int vehicleId && _invoiceDialog is not null)
+                await _invoiceDialog.OpenAsync(vehicleId);
+            else
+                Nav.NavigateTo("vehicles");
         }
         catch (Exception ex)
         {
+            Toasts.Error(ex.Message);
             _error = ex.Message;
         }
         finally
         {
             _saving = false;
         }
+    }
+
+    private void OnInvoiceClosed()
+    {
+        Nav.NavigateTo("vehicles");
     }
 
     private sealed class AcquireModel
@@ -485,7 +630,13 @@
         public VehicleDriveType? DriveType { get; set; }
         public int? Mileage { get; set; }
         public decimal? PurchasePrice { get; set; }
+        public string? PaymentMethod { get; set; }
         public string? Observations { get; set; }
+        public string? AcquisitionLocation { get; set; }
+        public string? SellerName { get; set; }
+        public string? SellerPhone { get; set; }
+        public string? SellerEmail { get; set; }
+        public string? PickupDriver { get; set; }
         public int VehicleSourceId { get; set; }
         public DateTime AcquiredAt { get; set; }
     }

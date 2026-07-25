@@ -43,7 +43,7 @@ else
                 <label class="form-label" for="veh-search">Búsqueda rápida</label>
                 <input id="veh-search"
                        class="form-control"
-                       placeholder="VIN, marca, modelo, año, fuente, paleta…"
+                       placeholder="VIN, recib, marca, modelo, año, fuente…"
                        @bind="_search"
                        @bind:event="oninput" />
             </div>
@@ -65,7 +65,7 @@ else
     {
         <div class="page-panel empty-state">
             <p class="empty-state__title">Sin resultados</p>
-            <p class="mb-0">Prueba otro VIN, marca o ubicación.</p>
+            <p class="mb-0">Prueba otro VIN, número de recibo, marca o ubicación.</p>
         </div>
     }
     else
@@ -76,6 +76,7 @@ else
                     <tr>
                         <th></th>
                         <th>VIN</th>
+                        <th>Recibo</th>
                         <th>Año</th>
                         <th>Marca / Modelo</th>
                         <th>Millas</th>
@@ -90,7 +91,7 @@ else
                     @foreach (var v in Filtered)
                     {
                         var vehicleId = v.Id;
-                        var images = VehicleService.GetImagePaths(v).ToList();
+                        var images = MediaPaths.ToUrls(VehicleService.GetImagePaths(v));
                         <tr class="row-clickable" @onclick="@(() => GoToDetail(vehicleId))">
                             <td style="width:3.75rem" @onclick:stopPropagation="true">
                                 @if (images.Count > 0)
@@ -108,12 +109,13 @@ else
                                 }
                             </td>
                             <td><code>@v.Vin</code></td>
+                            <td>@(v.InvoiceNumber is null ? "—" : $"#{v.InvoiceNumber}")</td>
                             <td>@(v.Year?.ToString() ?? "—")</td>
                             <td>
                                 <strong>@(string.IsNullOrWhiteSpace($"{v.Make} {v.Model}".Trim()) ? "—" : $"{v.Make} {v.Model}".Trim())</strong>
                             </td>
                             <td>@(v.Mileage?.ToString("N0") ?? "—")</td>
-                            <td>@(v.PurchasePrice is null ? "—" : v.PurchasePrice.Value.ToString("C2"))</td>
+                            <td>@UsdMoney.FormatOrDash(v.PurchasePrice)</td>
                             <td>@v.VehicleSource.Name</td>
                             <td>@v.AcquiredAt.ToString("yyyy-MM-dd")</td>
                             <td>
@@ -173,12 +175,19 @@ else
                 || Contains(v.Model, s)
                 || Contains(v.Year?.ToString(), s)
                 || Contains(v.VehicleSource?.Name, s)
-                || Contains(v.Pallet is null ? "Sin ubicar" : YardLayoutService.FormatPalletLabel(v.Pallet), s));
+                || Contains(v.Pallet is null ? "Sin ubicar" : YardLayoutService.FormatPalletLabel(v.Pallet), s)
+                || MatchesInvoiceNumber(v.InvoiceNumber, s));
         }
     }
 
     protected override async Task OnInitializedAsync()
     {
+        if (!CurrentUser.CanViewVehicles)
+        {
+            _error = "No tiene permiso para ver vehículos.";
+            return;
+        }
+
         try
         {
             await Busy.RunAsync(async () =>
@@ -203,4 +212,34 @@ else
     private static bool Contains(string? haystack, string needle)
         => !string.IsNullOrEmpty(haystack)
            && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Matches 1000, #1000, 001000, NO. 001000, etc.</summary>
+    private static bool MatchesInvoiceNumber(int? invoiceNumber, string needle)
+    {
+        if (invoiceNumber is null or <= 0)
+            return false;
+
+        var n = invoiceNumber.Value;
+        var raw = needle.Trim();
+        if (raw.Length == 0)
+            return false;
+
+        if (Contains(n.ToString(), raw)
+            || Contains($"#{n}", raw)
+            || Contains($"{n:000000}", raw)
+            || Contains($"NO. {n:000000}", raw))
+        {
+            return true;
+        }
+
+        var digits = new string(raw.Where(char.IsDigit).ToArray());
+        if (digits.Length == 0)
+            return false;
+
+        if (int.TryParse(digits, out var parsed) && parsed == n)
+            return true;
+
+        // Partial digit match, e.g. "100" finds 1000 / 1100
+        return n.ToString().Contains(digits, StringComparison.Ordinal);
+    }
 }

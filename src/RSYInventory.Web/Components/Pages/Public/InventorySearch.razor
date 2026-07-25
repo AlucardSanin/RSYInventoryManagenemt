@@ -1,0 +1,198 @@
+@page "/buscar"
+@layout PublicLayout
+@inject InventoryService Inventory
+@inject UiBusyService Busy
+
+<PageTitle>Buscar inventario · RSY Yard</PageTitle>
+
+<PageHeader Title="Buscar piezas disponibles"
+            Eyebrow="Catálogo público"
+            Lead="Consulta motores y transmisiones sin iniciar sesión. No se muestran acciones internas.">
+    <a class="btn btn-outline-secondary" href="login">Iniciar sesión</a>
+</PageHeader>
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+<div class="page-panel mb-3">
+    <div class="row g-2 align-items-end">
+        <div class="col-md-6">
+            <label class="form-label" for="public-inv-search">Búsqueda</label>
+            <input id="public-inv-search"
+                   class="form-control"
+                   placeholder="Marca, modelo, año, cilindrada, tracción…"
+                   @bind="_search"
+                   @bind:event="oninput" />
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Tipo</label>
+            <select class="form-select" @bind="_typeFilter">
+                <option value="">Todos</option>
+                <option value="engine">Motor</option>
+                <option value="transmission">Transmisión</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <p class="form-hint mb-0">
+                @if (_items is null)
+                {
+                    <text>Cargando…</text>
+                }
+                else
+                {
+                    <text>@Filtered.Count() de @_items.Count piezas</text>
+                }
+            </p>
+        </div>
+    </div>
+</div>
+
+@if (_items is null)
+{
+    <div class="page-panel"><p class="mb-0 text-muted">Cargando inventario…</p></div>
+}
+else if (_items.Count == 0)
+{
+    <div class="page-panel empty-state">
+        <p class="empty-state__title">No hay piezas disponibles</p>
+        <p class="mb-0">Vuelve a intentar más tarde.</p>
+    </div>
+}
+else if (!Filtered.Any())
+{
+    <div class="page-panel empty-state">
+        <p class="empty-state__title">Sin resultados</p>
+        <p class="mb-0">Prueba otra marca, modelo o año.</p>
+    </div>
+}
+else
+{
+    <div class="page-panel table-shell">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    <th></th>
+                    <th>Tipo</th>
+                    <th>Marca / Modelo</th>
+                    <th>Detalle</th>
+                    <th>Año</th>
+                    <th>Ubicación</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in Filtered)
+                {
+                    <tr>
+                        <td style="width:3.25rem">
+                            @if (!string.IsNullOrWhiteSpace(item.ImageRelativePath))
+                            {
+                                <img class="thumb-img" src="@MediaPaths.ToUrl(item.ImageRelativePath)" alt="" />
+                            }
+                        </td>
+                        <td>
+                            @if (item.ItemType == (int)InventoryItemType.Engine)
+                            {
+                                <span class="badge-type badge-type--engine">Motor</span>
+                            }
+                            else
+                            {
+                                <span class="badge-type badge-type--transmission">Transmisión</span>
+                            }
+                        </td>
+                        <td>
+                            <strong>@(string.IsNullOrWhiteSpace($"{item.Brand} {item.Model}".Trim()) ? "Sin marca/modelo" : $"{item.Brand} {item.Model}".Trim())</strong>
+                        </td>
+                        <td>@FormatDetails(item)</td>
+                        <td>@(item.Year?.ToString() ?? "—")</td>
+                        <td>@FormatLocation(item)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private List<InventoryItem>? _items;
+    private string? _error;
+    private string _search = string.Empty;
+    private string _typeFilter = string.Empty;
+
+    private IEnumerable<InventoryItem> Filtered
+    {
+        get
+        {
+            if (_items is null) return [];
+            IEnumerable<InventoryItem> q = _items;
+
+            if (_typeFilter == "engine")
+                q = q.Where(i => i.ItemType == (int)InventoryItemType.Engine);
+            else if (_typeFilter == "transmission")
+                q = q.Where(i => i.ItemType == (int)InventoryItemType.Transmission);
+
+            var s = _search.Trim();
+            if (string.IsNullOrEmpty(s)) return q;
+
+            return q.Where(i =>
+                Contains(i.Brand, s)
+                || Contains(i.Model, s)
+                || Contains(i.Description, s)
+                || Contains(i.Year?.ToString(), s)
+                || Contains(FormatLocation(i), s)
+                || Contains(FormatDetails(i), s));
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                _items = await Inventory.GetAvailableAsync();
+            }, "Cargando inventario…");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private static bool Contains(string? haystack, string needle)
+        => !string.IsNullOrEmpty(haystack)
+           && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
+
+    private static string FormatLocation(InventoryItem item)
+    {
+        if (item.Pallet?.Row?.Zone is null) return "Consultar en yarda";
+        var zone = item.Pallet.Row.Zone.Name;
+        var row = item.Pallet.Row.RowNumber;
+        return $"{zone} · Fila {row}";
+    }
+
+    private static string FormatDetails(InventoryItem item)
+    {
+        if (item.ItemType == (int)InventoryItemType.Engine)
+            return item.DisplacementLiters is null ? "—" : $"{item.DisplacementLiters:0.##} L";
+
+        var tx = item.TransmissionType is null ? null : ((TransmissionType)item.TransmissionType.Value) switch
+        {
+            TransmissionType.Automatic => "Automática",
+            TransmissionType.Manual => "Manual",
+            _ => null
+        };
+        var drive = item.DriveType is null ? null : ((VehicleDriveType)item.DriveType.Value) switch
+        {
+            VehicleDriveType.Fwd => "FWD",
+            VehicleDriveType.Rwd => "RWD",
+            VehicleDriveType.Awd => "AWD",
+            VehicleDriveType.FourByFour => "4x4",
+            VehicleDriveType.FourByTwo => "4x2",
+            _ => null
+        };
+
+        return string.Join(" · ", new[] { tx, drive }.Where(x => !string.IsNullOrEmpty(x)).DefaultIfEmpty("—"));
+    }
+}
