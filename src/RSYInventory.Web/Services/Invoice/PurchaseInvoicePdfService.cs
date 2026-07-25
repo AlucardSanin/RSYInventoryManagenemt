@@ -55,7 +55,10 @@ public sealed class PurchaseInvoicePdfService
                         ?? "RODRIGUEZ SALVAGE YARD";
         var address = template?.AddressLine1 ?? _company.AddressLine1;
         var city = template?.CityStateZip ?? _company.CityStateZip;
-        var email = template?.Email ?? _company.Email;
+        // Prefer template email; do not fall back to RSY email when the template leaves it blank (e.g. Saul Motors).
+        var email = template is null
+            ? _company.Email
+            : (template.Email ?? string.Empty);
         var logo = template?.LogoRelativePath ?? "/invoice/rsy-invoice-logo.png";
         var useRsyFooter = !IsSaulMotorsTemplate(template);
 
@@ -314,7 +317,8 @@ public sealed class PurchaseInvoicePdfService
                                     buyer.Item().PaddingTop(4).Text(model.BuyerName).SemiBold();
                                     buyer.Item().Text(model.BuyerAddressLine1).FontSize(8.5f);
                                     buyer.Item().Text(model.BuyerCityStateZip).FontSize(8.5f);
-                                    buyer.Item().Text(model.BuyerEmail).FontSize(8.5f);
+                                    if (!string.IsNullOrWhiteSpace(model.BuyerEmail))
+                                        buyer.Item().Text(model.BuyerEmail!).FontSize(8.5f);
                                 }
                                 else if (mode == ReceiptLayoutMode.Guide)
                                 {

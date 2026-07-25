@@ -179,7 +179,7 @@ public sealed class InvoiceTemplateService
     }
 
     /// <summary>
-    /// Picks the branding template that matches the vehicle source (e.g. Saul Motors),
+    /// Picks the branding template that matches the vehicle source (e.g. Sauls Motor Co),
     /// otherwise the default / first active template.
     /// </summary>
     public async Task<InvoiceTemplate?> SuggestForVehicleSourceAsync(
