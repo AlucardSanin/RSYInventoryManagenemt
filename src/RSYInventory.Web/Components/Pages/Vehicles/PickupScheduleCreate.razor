@@ -1,4 +1,5 @@
 @page "/vehicles/pickups/new"
+@page "/vehicles/pickups/{Id:int}/edit"
 @implements IDisposable
 @inject PickupScheduleService Schedules
 @inject VehicleService Vehicles
@@ -10,11 +11,13 @@
 @inject ICurrentUserService CurrentUser
 @using Microsoft.AspNetCore.Components.Forms
 
-<PageTitle>Agendar recolección</PageTitle>
+<PageTitle>@(IsEdit ? "Editar recolección" : "Agendar recolección")</PageTitle>
 
-<PageHeader Title="Agendar recolección de vehículo"
+<PageHeader Title="@(IsEdit ? "Editar recolección pendiente" : "Agendar recolección de vehículo")"
             Eyebrow="Vehículos"
-            Lead="VIN, datos del auto, fecha/hora acordada con el vendedor y dirección. El chofer es opcional. En móvil el formulario va por pasos.">
+            Lead="@(IsEdit
+                ? "Solo se pueden editar recolecciones pendientes (aún no marcadas como recogidas)."
+                : "VIN, datos del auto, fecha/ventana acordada con el vendedor y dirección. El chofer es opcional. En móvil el formulario va por pasos.")">
     <a class="btn btn-outline-secondary" href="vehicles/pickups">Volver a agenda</a>
 </PageHeader>
 
@@ -227,7 +230,7 @@ else
                     else
                     {
                         <button type="submit" class="btn btn-primary" disabled="@(_saving || Busy.IsBusy)">
-                            @(_saving ? "Guardando…" : "Guardar en agenda")
+                            @(_saving ? "Guardando…" : IsEdit ? "Guardar cambios" : "Guardar en agenda")
                         </button>
                     }
                 </div>
@@ -235,7 +238,7 @@ else
 
             <div class="form-actions form-actions--desktop">
                 <button type="submit" class="btn btn-primary" disabled="@(_saving || Busy.IsBusy)">
-                    @(_saving ? "Guardando…" : "Guardar en agenda")
+                    @(_saving ? "Guardando…" : IsEdit ? "Guardar cambios" : "Guardar en agenda")
                 </button>
                 <a class="btn btn-link" href="vehicles/pickups">Cancelar</a>
             </div>
@@ -244,6 +247,10 @@ else
 }
 
 @code {
+    [Parameter] public int? Id { get; set; }
+
+    private bool IsEdit => Id is > 0;
+
     private const int MobileStepCount = 5;
 
     private static readonly IReadOnlyList<ComboOption> _transmissionOptions =
@@ -325,6 +332,37 @@ else
 
                 var drivers = await Schedules.GetDriverUsersAsync();
                 _driverOptions = drivers.Select(d => new ComboOption(d.Id.ToString(), d.DisplayName)).ToList();
+
+                if (IsEdit)
+                {
+                    var existing = await Schedules.GetByIdAsync(Id!.Value)
+                        ?? throw new InvalidOperationException("Agenda no encontrada.");
+                    if (existing.Status != (byte)ScheduledPickupStatus.Pending)
+                        throw new InvalidOperationException("Solo se pueden editar recolecciones pendientes.");
+
+                    _model.Vin = existing.Vin;
+                    _model.Year = existing.Year;
+                    _model.Make = existing.Make;
+                    _model.Model = existing.Model;
+                    _model.TransmissionType = existing.TransmissionType is null
+                        ? null
+                        : (TransmissionType)existing.TransmissionType.Value;
+                    _model.DriveType = existing.DriveType is null
+                        ? null
+                        : (VehicleDriveType)existing.DriveType.Value;
+                    _model.Mileage = existing.Mileage;
+                    _model.PurchasePrice = existing.PurchasePrice;
+                    _model.PaymentMethod = existing.PaymentMethod;
+                    _model.Observations = existing.Observations;
+                    _model.PickupAddress = existing.PickupAddress;
+                    _model.SellerName = existing.SellerName;
+                    _model.SellerPhone = existing.SellerPhone;
+                    _model.SellerEmail = existing.SellerEmail;
+                    _model.AssignedDriverUserId = existing.AssignedDriverUserId;
+                    _model.VehicleSourceId = existing.VehicleSourceId;
+                    _model.ScheduledPickupDate = existing.ScheduledPickupDate;
+                    _model.ScheduledPickupWindow = existing.ScheduledPickupWindow;
+                }
 
                 if (!string.IsNullOrWhiteSpace(_model.Make) && _model.Year is not null)
                     await ReloadModelOptionsAsync();
@@ -585,25 +623,55 @@ else
                     throw new InvalidOperationException("Ingresa el VIN.");
                 if (_model.VehicleSourceId <= 0)
                     throw new InvalidOperationException("Seleccione una fuente.");
-                var created = await Schedules.ScheduleAsync(
-                    _model.Vin ?? string.Empty,
-                    _model.Year,
-                    _model.Make,
-                    _model.Model,
-                    _model.TransmissionType,
-                    _model.DriveType,
-                    _model.Mileage,
-                    _model.PurchasePrice,
-                    _model.Observations,
-                    _model.VehicleSourceId,
-                    _model.ScheduledPickupDate,
-                    _model.ScheduledPickupWindow,
-                    _model.PickupAddress,
-                    _model.SellerName,
-                    _model.SellerPhone,
-                    _model.SellerEmail,
-                    _model.PaymentMethod,
-                    _model.AssignedDriverUserId);
+
+                int scheduleId;
+                if (IsEdit)
+                {
+                    await Schedules.UpdatePendingAsync(
+                        Id!.Value,
+                        _model.Vin ?? string.Empty,
+                        _model.Year,
+                        _model.Make,
+                        _model.Model,
+                        _model.TransmissionType,
+                        _model.DriveType,
+                        _model.Mileage,
+                        _model.PurchasePrice,
+                        _model.Observations,
+                        _model.VehicleSourceId,
+                        _model.ScheduledPickupDate,
+                        _model.ScheduledPickupWindow,
+                        _model.PickupAddress,
+                        _model.SellerName,
+                        _model.SellerPhone,
+                        _model.SellerEmail,
+                        _model.PaymentMethod,
+                        _model.AssignedDriverUserId);
+                    scheduleId = Id.Value;
+                }
+                else
+                {
+                    var created = await Schedules.ScheduleAsync(
+                        _model.Vin ?? string.Empty,
+                        _model.Year,
+                        _model.Make,
+                        _model.Model,
+                        _model.TransmissionType,
+                        _model.DriveType,
+                        _model.Mileage,
+                        _model.PurchasePrice,
+                        _model.Observations,
+                        _model.VehicleSourceId,
+                        _model.ScheduledPickupDate,
+                        _model.ScheduledPickupWindow,
+                        _model.PickupAddress,
+                        _model.SellerName,
+                        _model.SellerPhone,
+                        _model.SellerEmail,
+                        _model.PaymentMethod,
+                        _model.AssignedDriverUserId);
+                    scheduleId = created.Id;
+                }
 
                 if (_imageFiles.Count > 0)
                 {
@@ -614,8 +682,8 @@ else
                         try
                         {
                             await using var stream = file.OpenReadStream(maxAllowedSize: 8 * 1024 * 1024);
-                            var path = await Media.SaveAsync(stream, file.Name, "pickups", created.Id, _model.Make);
-                            await Schedules.AddImageAsync(created.Id, path);
+                            var path = await Media.SaveAsync(stream, file.Name, "pickups", scheduleId, _model.Make);
+                            await Schedules.AddImageAsync(scheduleId, path);
                         }
                         catch (Exception imgEx)
                         {
@@ -630,13 +698,13 @@ else
                         Toasts.Info($"Recolección guardada, pero {failed} foto(s) no se pudieron subir{detail}.");
                     }
                     else
-                        Toasts.Success("Recolección agendada.");
+                        Toasts.Success(IsEdit ? "Recolección actualizada." : "Recolección agendada.");
                 }
                 else
                 {
-                    Toasts.Success("Recolección agendada.");
+                    Toasts.Success(IsEdit ? "Recolección actualizada." : "Recolección agendada.");
                 }
-            }, "Guardando en agenda…");
+            }, IsEdit ? "Guardando cambios…" : "Guardando en agenda…");
 
             Nav.NavigateTo("vehicles/pickups");
         }

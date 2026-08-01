@@ -9,13 +9,16 @@ public sealed class PickupScheduleService
 {
     private readonly IDbContextFactory<YardInventoryDbContext> _dbFactory;
     private readonly ICurrentUserService _currentUser;
+    private readonly AuditService _audit;
 
     public PickupScheduleService(
         IDbContextFactory<YardInventoryDbContext> dbFactory,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        AuditService audit)
     {
         _dbFactory = dbFactory;
         _currentUser = currentUser;
+        _audit = audit;
     }
 
     public async Task<List<User>> GetDriverUsersAsync(CancellationToken ct = default)
@@ -139,7 +142,143 @@ public sealed class PickupScheduleService
 
         db.ScheduledVehiclePickups.Add(entity);
         await db.SaveChangesAsync(ct);
+
+        await _audit.WriteAsync(
+            "PickupScheduled",
+            "ScheduledVehiclePickup",
+            entity.Id,
+            $"Agenda creada: {entity.Vin}",
+            $"Fecha {entity.ScheduledPickupDate:yyyy-MM-dd}"
+            + (string.IsNullOrWhiteSpace(entity.ScheduledPickupWindow) ? "" : $" · {entity.ScheduledPickupWindow}")
+            + (driverId is null ? " · sin chofer" : $" · chofer #{driverId}"),
+            ct);
+
         return entity;
+    }
+
+    public async Task UpdatePendingAsync(
+        int id,
+        string vin,
+        int? year,
+        string? make,
+        string? model,
+        TransmissionType? transmissionType,
+        VehicleDriveType? driveType,
+        int? mileage,
+        decimal? purchasePrice,
+        string? observations,
+        int vehicleSourceId,
+        DateOnly scheduledPickupDate,
+        string? scheduledPickupWindow,
+        string? pickupAddress,
+        string? sellerName,
+        string? sellerPhone,
+        string? sellerEmail,
+        string? paymentMethod,
+        int? assignedDriverUserId,
+        CancellationToken ct = default)
+    {
+        EnsureCanManageSchedule();
+
+        vin = vin.Trim().ToUpperInvariant();
+        if (vin.Length is < 11 or > 17)
+            throw new InvalidOperationException("El VIN debe tener entre 11 y 17 caracteres.");
+        if (vehicleSourceId <= 0)
+            throw new InvalidOperationException("Selecciona la fuente.");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var entity = await db.ScheduledVehiclePickups
+            .FirstOrDefaultAsync(s => s.Id == id, ct)
+            ?? throw new InvalidOperationException("Agenda no encontrada.");
+
+        if (entity.Status != (byte)ScheduledPickupStatus.Pending)
+            throw new InvalidOperationException("Solo se pueden editar recolecciones pendientes.");
+
+        if (await db.Vehicles.AnyAsync(v => v.Vin == vin, ct))
+            throw new InvalidOperationException("Ese VIN ya está en vehículos adquiridos.");
+
+        if (await db.ScheduledVehiclePickups.AnyAsync(
+                s => s.Id != id
+                     && s.Vin == vin
+                     && s.Status != (byte)ScheduledPickupStatus.Promoted, ct))
+            throw new InvalidOperationException("Ese VIN ya está en la agenda de recolección.");
+
+        if (!await db.VehicleSources.AnyAsync(s => s.Id == vehicleSourceId && s.IsActive, ct))
+            throw new InvalidOperationException("Fuente inválida.");
+
+        int? driverId = assignedDriverUserId is > 0 ? assignedDriverUserId : null;
+        if (driverId is not null)
+        {
+            var driverOk = await db.Users
+                .Include(u => u.Roles)
+                .AnyAsync(u => u.Id == driverId
+                               && u.IsActive
+                               && u.Roles.Any(r => r.Code == (int)AppRole.Driver), ct);
+            if (!driverOk)
+                throw new InvalidOperationException("El chofer seleccionado no es válido.");
+        }
+
+        var previousVin = entity.Vin;
+        entity.Vin = vin;
+        entity.Year = year;
+        entity.Make = NullIfWhiteSpace(make);
+        entity.Model = NullIfWhiteSpace(model);
+        entity.TransmissionType = transmissionType is null ? null : (int)transmissionType;
+        entity.DriveType = driveType is null ? null : (int)driveType;
+        entity.Mileage = mileage;
+        entity.PurchasePrice = purchasePrice is null or <= 0
+            ? null
+            : Math.Round(purchasePrice.Value, 2, MidpointRounding.AwayFromZero);
+        entity.Observations = NullIfWhiteSpace(observations);
+        entity.VehicleSourceId = vehicleSourceId;
+        entity.ScheduledPickupDate = scheduledPickupDate;
+        entity.ScheduledPickupWindow = NullIfWhiteSpace(scheduledPickupWindow);
+        entity.PickupAddress = NullIfWhiteSpace(pickupAddress);
+        entity.SellerName = NullIfWhiteSpace(sellerName);
+        entity.SellerPhone = NullIfWhiteSpace(sellerPhone);
+        entity.SellerEmail = NullIfWhiteSpace(sellerEmail);
+        entity.PaymentMethod = NullIfWhiteSpace(paymentMethod);
+        entity.AssignedDriverUserId = driverId;
+        entity.UpdatedAtUtc = DateTime.UtcNow;
+
+        await db.SaveChangesAsync(ct);
+
+        await _audit.WriteAsync(
+            "PickupScheduleUpdated",
+            "ScheduledVehiclePickup",
+            entity.Id,
+            $"Agenda editada: {entity.Vin}",
+            previousVin == entity.Vin
+                ? $"Fecha {entity.ScheduledPickupDate:yyyy-MM-dd}"
+                  + (string.IsNullOrWhiteSpace(entity.ScheduledPickupWindow) ? "" : $" · {entity.ScheduledPickupWindow}")
+                : $"VIN {previousVin} → {entity.Vin}; fecha {entity.ScheduledPickupDate:yyyy-MM-dd}",
+            ct);
+    }
+
+    public async Task DeletePendingAsync(int id, CancellationToken ct = default)
+    {
+        EnsureCanManageSchedule();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var entity = await db.ScheduledVehiclePickups
+            .Include(s => s.Images)
+            .FirstOrDefaultAsync(s => s.Id == id, ct)
+            ?? throw new InvalidOperationException("Agenda no encontrada.");
+
+        if (entity.Status != (byte)ScheduledPickupStatus.Pending)
+            throw new InvalidOperationException("Solo se pueden eliminar recolecciones pendientes.");
+
+        var vin = entity.Vin;
+        var date = entity.ScheduledPickupDate;
+        db.ScheduledVehiclePickups.Remove(entity);
+        await db.SaveChangesAsync(ct);
+
+        await _audit.WriteAsync(
+            "PickupScheduleDeleted",
+            "ScheduledVehiclePickup",
+            id,
+            $"Agenda eliminada: {vin}",
+            $"Fecha programada {date:yyyy-MM-dd}",
+            ct);
     }
 
     public async Task AddImageAsync(int scheduledId, string relativePath, CancellationToken ct = default)
@@ -177,13 +316,16 @@ public sealed class PickupScheduleService
         if (driver is null || !driver.Roles.Any(r => r.Code == (int)AppRole.Driver))
             return null;
 
+        // Drivers only see today's agenda (NC local date) — not future scheduled days.
+        var today = YardTimeZone.TodayEastern();
         var active = await db.ScheduledVehiclePickups
             .AsNoTracking()
             .Include(s => s.VehicleSource)
             .Include(s => s.Images)
             .Where(s => s.AssignedDriverUserId == driver.Id
-                        && s.Status != (byte)ScheduledPickupStatus.Promoted)
-            .OrderBy(s => s.ScheduledPickupDate)
+                        && s.Status != (byte)ScheduledPickupStatus.Promoted
+                        && s.ScheduledPickupDate == today)
+            .OrderBy(s => s.ScheduledPickupWindow)
             .ThenBy(s => s.Id)
             .ToListAsync(ct);
 
@@ -234,6 +376,15 @@ public sealed class PickupScheduleService
         entity.PickedUpAtUtc = DateTime.UtcNow;
         entity.UpdatedAtUtc = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
+
+        await _audit.WriteForUserAsync(
+            driver.Id,
+            "PickupMarkedPickedUp",
+            "ScheduledVehiclePickup",
+            entity.Id,
+            $"Chofer marcó recogido: {entity.Vin}",
+            $"Driver {driver.DisplayName}",
+            ct);
     }
 
     public async Task MarkNotPickedUpAsync(Guid token, int scheduledId, CancellationToken ct = default)
@@ -253,6 +404,15 @@ public sealed class PickupScheduleService
         entity.PickedUpAtUtc = null;
         entity.UpdatedAtUtc = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
+
+        await _audit.WriteForUserAsync(
+            driver.Id,
+            "PickupMarkReverted",
+            "ScheduledVehiclePickup",
+            entity.Id,
+            $"Chofer revirtió recogido: {entity.Vin}",
+            $"Driver {driver.DisplayName}",
+            ct);
     }
 
     public async Task<List<DriverReportRow>> GetDriverReportAsync(
@@ -411,6 +571,16 @@ public sealed class PickupScheduleService
             s.PromotedAtUtc = DateTime.UtcNow;
             s.UpdatedAtUtc = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
+
+            await _audit.WriteForUserAsync(
+                s.CreatedByUserId,
+                "PickupPromotedToAcquired",
+                "ScheduledVehiclePickup",
+                s.Id,
+                $"Agenda promovida a adquiridos: {s.Vin}",
+                $"VehicleId={vehicle.Id} (12:00 ET)",
+                ct);
+
             count++;
         }
 

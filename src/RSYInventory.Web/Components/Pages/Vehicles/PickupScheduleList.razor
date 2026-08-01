@@ -4,6 +4,7 @@
 @inject UiBusyService Busy
 @inject ToastService Toasts
 @inject NavigationManager Nav
+@inject IJSRuntime Js
 
 <PageTitle>Agenda de recolección</PageTitle>
 
@@ -122,6 +123,58 @@ else
     </div>
 
     <div class="page-panel mb-3">
+        <h2 class="page-panel__title">Enlaces de choferes</h2>
+        <p class="form-hint mb-3">Copia y envía el enlace al chofer. Entra sin contraseña a su agenda del día.</p>
+        @if (_drivers.Count == 0)
+        {
+            <p class="mb-0 text-muted">No hay usuarios con rol Chofer. Créalos en Usuarios.</p>
+        }
+        else
+        {
+            <div class="table-shell">
+                <table class="table table-sm table-hover align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Chofer</th>
+                            <th>Enlace</th>
+                            <th class="text-end">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var d in _drivers)
+                        {
+                            var link = d.DriverAccessToken is Guid token
+                                ? Nav.ToAbsoluteUri($"d/{token}").ToString()
+                                : null;
+                            <tr>
+                                <td><strong>@d.DisplayName</strong></td>
+                                <td>
+                                    @if (link is null)
+                                    {
+                                        <span class="text-muted">Sin enlace — regenera en Usuarios</span>
+                                    }
+                                    else
+                                    {
+                                        <div class="form-hint mono" style="max-width:28rem;word-break:break-all">@link</div>
+                                    }
+                                </td>
+                                <td class="text-end">
+                                    @if (link is not null)
+                                    {
+                                        <button type="button"
+                                                class="btn btn-sm btn-outline-secondary"
+                                                @onclick="() => CopyDriverLinkAsync(link)">Copiar enlace</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <div class="page-panel mb-3">
         <div class="row g-2 align-items-end">
             <div class="col-md-5">
                 <label class="form-label">Búsqueda</label>
@@ -168,6 +221,7 @@ else
                         <th>Chofer</th>
                         <th>Status</th>
                         <th>Hora recogida</th>
+                        <th class="text-end">Acciones</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -197,12 +251,51 @@ else
                                     ? "—"
                                     : YardTimeZone.ToEastern(s.PickedUpAtUtc.Value).ToString("HH:mm"))
                             </td>
+                            <td class="text-end">
+                                @if (s.Status == (byte)ScheduledPickupStatus.Pending)
+                                {
+                                    <a class="btn btn-sm btn-outline-primary" href="@($"vehicles/pickups/{s.Id}/edit")">Editar</a>
+                                    <button type="button"
+                                            class="btn btn-sm btn-outline-danger"
+                                            disabled="@Busy.IsBusy"
+                                            @onclick="() => AskDelete(s)">Eliminar</button>
+                                }
+                                else
+                                {
+                                    <span class="form-hint">—</span>
+                                }
+                            </td>
                         </tr>
                     }
                 </tbody>
             </table>
         </div>
     }
+}
+
+@if (_deleteTarget is not null)
+{
+    <div class="modal-backdrop show"></div>
+    <div class="modal d-block" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5">Eliminar recolección</h2>
+                    <button type="button" class="btn-close" @onclick="CancelDelete"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-0">
+                        ¿Seguro que quieres eliminar la recolección pendiente de
+                        <code>@_deleteTarget.Vin</code>?
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CancelDelete">Cancelar</button>
+                    <button type="button" class="btn btn-danger" disabled="@Busy.IsBusy" @onclick="ConfirmDeleteAsync">Eliminar</button>
+                </div>
+            </div>
+        </div>
+    </div>
 }
 
 @code {
@@ -216,6 +309,7 @@ else
     private string _reportMode = "both";
     private DateTime? _reportFrom;
     private DateTime? _reportTo;
+    private ScheduledVehiclePickup? _deleteTarget;
 
     private IEnumerable<ScheduledVehiclePickup> Filtered
     {
@@ -279,6 +373,45 @@ else
                 DateOnly? to = _reportTo is null ? null : DateOnly.FromDateTime(_reportTo.Value);
                 _report = await Schedules.GetDriverReportAsync(driverId, includePending, includePicked, from, to);
             }, "Generando reporte…");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+            _error = ex.Message;
+        }
+    }
+
+    private void AskDelete(ScheduledVehiclePickup s) => _deleteTarget = s;
+    private void CancelDelete() => _deleteTarget = null;
+
+    private async Task CopyDriverLinkAsync(string link)
+    {
+        if (string.IsNullOrWhiteSpace(link)) return;
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", link);
+            Toasts.Success("Enlace del chofer copiado.");
+        }
+        catch
+        {
+            Toasts.Error("No se pudo copiar. Selecciona el enlace y cópialo manualmente.");
+        }
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (_deleteTarget is null || Busy.IsBusy) return;
+        var id = _deleteTarget.Id;
+        _error = null;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                await Schedules.DeletePendingAsync(id);
+                _items = await Schedules.GetActiveScheduleAsync();
+            }, "Eliminando…");
+            Toasts.Success("Recolección eliminada.");
+            _deleteTarget = null;
         }
         catch (Exception ex)
         {
