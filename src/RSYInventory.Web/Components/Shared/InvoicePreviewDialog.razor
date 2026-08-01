@@ -1,0 +1,491 @@
+@inject VehicleInvoiceService Invoices
+@inject UiBusyService Busy
+@inject ToastService Toasts
+@inject IJSRuntime Js
+@using RSYInventory.Data.Entities
+@using RSYInventory.Web.Services.Invoice
+
+@if (_open)
+{
+    <div class="invoice-dialog"
+         role="dialog"
+         aria-modal="true"
+         aria-labelledby="invoice-dialog-title"
+         @onclick="Close">
+        <div class="invoice-dialog__panel" @onclick:stopPropagation="true">
+            <div class="invoice-dialog__header">
+                <div>
+                    <h2 id="invoice-dialog-title" class="invoice-dialog__title">
+                        @DialogTitle
+                    </h2>
+                    <p class="invoice-dialog__lead">@DialogLead</p>
+                </div>
+                <button type="button" class="btn-close" aria-label="Cerrar" @onclick="Close"></button>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-danger py-2">@_error</div>
+            }
+            @if (!string.IsNullOrEmpty(_info))
+            {
+                <div class="alert alert-success py-2">@_info</div>
+            }
+
+            @if (_step == Step.ConfirmRegenerate)
+            {
+                <p class="mb-3">
+                    Regenerar reemplaza el recibo actual (incluido el firmado). Se mantiene el número
+                    <strong>#@(_result?.Model.DocumentNumber)</strong>.
+                    La plantilla se elige sola según la fuente del vehículo (p. ej. Sauls Motor Co).
+                    Confirma con la contraseña de un usuario administrador.
+                </p>
+                <div class="mb-3">
+                    <label class="form-label" for="admin-regen-password">Contraseña de administrador</label>
+                    <input id="admin-regen-password"
+                           type="password"
+                           class="form-control"
+                           @bind="_adminPassword"
+                           autocomplete="current-password"
+                           disabled="@_busy" />
+                </div>
+                <div class="invoice-dialog__actions">
+                    <button type="button"
+                            class="btn btn-danger"
+                            disabled="@(_busy || string.IsNullOrEmpty(_adminPassword))"
+                            @onclick="ConfirmRegenerateAsync">
+                        @(_busy ? "Validando…" : "Confirmar regeneración")
+                    </button>
+                    <button type="button" class="btn btn-link" @onclick="CancelRegenerate" disabled="@_busy">Cancelar</button>
+                </div>
+            }
+            else if (_result is not null)
+            {
+                <div class="invoice-dialog__preview">
+                    <object class="invoice-dialog__frame"
+                            data="@PdfDataUrl"
+                            type="application/pdf"
+                            title="Vista previa del recibo de compra">
+                        <p class="mb-2">Tu navegador no puede mostrar el PDF aquí.</p>
+                        <a class="btn btn-outline-primary" href="@PdfDataUrl" download="@_result.FileName">Descargar PDF</a>
+                    </object>
+                </div>
+
+                <div class="invoice-dialog__meta">
+                    <div><span>Estado</span> @StatusLabel</div>
+                    <div><span>Plantilla</span> @_result.Template.Name</div>
+                    <div><span>Comprador</span> @_result.Model.BuyerName</div>
+                    <div><span>Vendedor</span> @(string.IsNullOrWhiteSpace(_result.Vehicle.SellerName) ? "—" : _result.Vehicle.SellerName)</div>
+                    <div><span>Correo</span> @(string.IsNullOrWhiteSpace(_result.Vehicle.SellerEmail) ? "—" : _result.Vehicle.SellerEmail)</div>
+                    <div><span>Teléfono</span> @(string.IsNullOrWhiteSpace(_result.Vehicle.SellerPhone) ? "—" : _result.Vehicle.SellerPhone)</div>
+                    <div><span>Pago</span> @(string.IsNullOrWhiteSpace(_result.Model.PaymentMethod) ? "—" : _result.Model.PaymentMethod)</div>
+                </div>
+
+                <div class="invoice-dialog__actions">
+                    <button type="button"
+                            class="btn btn-outline-warning"
+                            disabled="@_busy"
+                            @onclick="StartRegenerate">
+                        Volver a generar
+                    </button>
+
+                    <a class="btn btn-outline-secondary" href="@PdfDataUrl" download="@_result.FileName">Descargar</a>
+
+                    @if (!_result.IsSigned && HasPendingSignature)
+                    {
+                        <button type="button"
+                                class="btn btn-outline-secondary"
+                                disabled="@_busy"
+                                @onclick="RefreshSignatureAsync">
+                            @(_busyRefresh ? "Consultando…" : "Actualizar firma")
+                        </button>
+                    }
+
+                    <button type="button"
+                            class="btn btn-primary"
+                            disabled="@(_busy || !CanEmailSigned)"
+                            title="@EmailDisabledReason"
+                            @onclick="SendEmailAsync">
+                        @(_busyEmail ? "Enviando…" : "Enviar por correo")
+                    </button>
+
+                    @if (!_result.IsSigned)
+                    {
+                        <button type="button"
+                                class="btn btn-outline-primary"
+                                disabled="@(_busy || !CanSign)"
+                                title="@SignDisabledReason"
+                                @onclick="SendForSignatureAsync">
+                            @(_busySign ? "Generando…" : SignButtonLabel)
+                        </button>
+                    }
+
+                    <button type="button" class="btn btn-link" @onclick="Close" disabled="@_busy">Cerrar</button>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(_signUrl) && !_result.IsSigned)
+                {
+                    <div class="invoice-dialog__sign-link">
+                        <p class="invoice-dialog__sign-link-title">Enlace de firma del vendedor</p>
+                        <p class="invoice-dialog__sign-link-help">
+                            Comparte este enlace (WhatsApp, SMS o en persona). Firmar el PDF descargado no registra la firma en el sistema.
+                        </p>
+                        <div class="invoice-dialog__sign-link-row">
+                            <input class="form-control form-control-sm mono"
+                                   readonly
+                                   value="@_signUrl"
+                                   onclick="this.select()" />
+                            <button type="button"
+                                    class="btn btn-sm btn-primary"
+                                    disabled="@_busy"
+                                    @onclick="CopySignUrlAsync">
+                                @(_copied ? "Copiado" : "Copiar")
+                            </button>
+                            <a class="btn btn-sm btn-outline-secondary"
+                               href="@_signUrl"
+                               target="_blank"
+                               rel="noopener">Abrir</a>
+                        </div>
+                    </div>
+                }
+
+                @if (!Invoices.CanEmail)
+                {
+                    <p class="invoice-dialog__hint">
+                        Configura <code>Smtp</code> para enviar el recibo firmado por correo cuando el vendedor tenga email.
+                    </p>
+                }
+                else if (string.IsNullOrWhiteSpace(_result.Vehicle.SellerEmail) && !_result.IsSigned)
+                {
+                    <p class="invoice-dialog__hint">
+                        Sin correo del vendedor: genera el enlace de firma y compártelo manualmente. El PDF solo no sirve para firmar.
+                    </p>
+                }
+                else if (!_result.IsSigned)
+                {
+                    <p class="invoice-dialog__hint">
+                        «Enviar por correo» se habilita cuando el recibo ya está firmado en DocuSeal.
+                    </p>
+                }
+
+                @if (!_result.IsSigned && !Invoices.CanSendForSignature)
+                {
+                    <p class="invoice-dialog__hint">
+                        Configura <code>DocuSeal</code> (Enabled, BaseUrl, ApiKey, TemplateId) para habilitar la firma electrónica.
+                    </p>
+                }
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private enum Step { Loading, Preview, ConfirmRegenerate }
+
+    [Parameter] public EventCallback OnClosed { get; set; }
+
+    private bool _open;
+    private bool _busy;
+    private bool _busyEmail;
+    private bool _busySign;
+    private bool _busyRefresh;
+    private bool _copied;
+    private Step _step = Step.Loading;
+    private int _vehicleId;
+    private string? _error;
+    private string? _info;
+    private string? _signUrl;
+    private string _adminPassword = string.Empty;
+    private VehicleInvoiceResult? _result;
+
+    private string PdfDataUrl =>
+        _result is null
+            ? string.Empty
+            : $"data:application/pdf;base64,{Convert.ToBase64String(_result.PdfBytes)}";
+
+    private string DialogTitle => _step switch
+    {
+        Step.ConfirmRegenerate => "Confirmar regeneración",
+        Step.Loading => "Recibo de compra",
+        _ => $"Recibo de compra #{_result?.Model.DocumentNumber}"
+    };
+
+    private string DialogLead => _step switch
+    {
+        Step.ConfirmRegenerate => "Se requiere autorización de un administrador del sistema.",
+        Step.Loading => "Cargando…",
+        _ => _result?.IsSigned == true
+            ? "Recibo firmado. Puedes descargarlo o enviarlo por correo."
+            : "Revisa el acuse y genera el enlace de firma (por correo o para compartir)."
+    };
+
+    private string StatusLabel =>
+        _result is null ? "—"
+        : _result.IsSigned ? "Firmado"
+        : HasPendingSignature ? "Pendiente de firma"
+        : "Generado (sin firmar)";
+
+    private bool HasPendingSignature =>
+        _result is not null
+        && !_result.IsSigned
+        && (_result.Vehicle.DocuSealSubmissionId is > 0
+            || !string.IsNullOrWhiteSpace(_result.Vehicle.SellerSigningUrl)
+            || !string.IsNullOrWhiteSpace(_signUrl));
+
+    private bool CanEmailSigned =>
+        _result is { IsSigned: true }
+        && Invoices.CanEmail
+        && !string.IsNullOrWhiteSpace(_result.Vehicle.SellerEmail);
+
+    private bool CanSign =>
+        _result is { IsSigned: false }
+        && Invoices.CanSendForSignature;
+
+    private bool HasSellerEmail =>
+        _result is not null && !string.IsNullOrWhiteSpace(_result.Vehicle.SellerEmail);
+
+    private string SignButtonLabel =>
+        HasSellerEmail && Invoices.CanEmail
+            ? "Enviar enlace de firma"
+            : "Generar enlace de firma";
+
+    private string EmailDisabledReason
+    {
+        get
+        {
+            if (_result is null) return string.Empty;
+            if (!_result.IsSigned)
+                return "Disponible solo cuando el recibo ya está firmado.";
+            if (string.IsNullOrWhiteSpace(_result.Vehicle.SellerEmail))
+                return "No hay correo del vendedor en este vehículo.";
+            if (!Invoices.CanEmail)
+                return "SMTP no está configurado.";
+            return "Enviar recibo firmado por correo";
+        }
+    }
+
+    private string SignDisabledReason
+    {
+        get
+        {
+            if (_result is null) return string.Empty;
+            if (!Invoices.CanSendForSignature)
+                return "DocuSeal no está configurado.";
+            return HasSellerEmail && Invoices.CanEmail
+                ? "Crear enlace de firma y enviarlo por correo"
+                : "Crear enlace de firma para compartir (WhatsApp / en persona)";
+        }
+    }
+
+    public async Task OpenAsync(int vehicleId)
+    {
+        _vehicleId = vehicleId;
+        _error = null;
+        _info = null;
+        _signUrl = null;
+        _copied = false;
+        _result = null;
+        _adminPassword = string.Empty;
+        _step = Step.Loading;
+        _open = true;
+
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                var existing = await Invoices.TryLoadExistingAsync(_vehicleId);
+                if (existing is not null)
+                {
+                    _result = existing;
+                    _signUrl = existing.Vehicle.SellerSigningUrl;
+                    _step = Step.Preview;
+                    if (existing.IsSigned)
+                        _info = "Mostrando el recibo firmado.";
+                    else if (!string.IsNullOrWhiteSpace(_signUrl))
+                        _info = "Pendiente de firma del vendedor. Usa «Actualizar firma» cuando haya firmado.";
+                    return;
+                }
+
+                await GenerateWithSuggestedTemplateAsync();
+            }, "Cargando recibo…");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Toasts.Error(ex.Message);
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task GenerateWithSuggestedTemplateAsync()
+    {
+        var templateId = await Invoices.SuggestTemplateIdAsync(_vehicleId)
+            ?? throw new InvalidOperationException(
+                "No hay plantillas de recibo activas. Ejecuta 012/014 o créalas en Administración.");
+
+        _result = await Invoices.GenerateAsync(_vehicleId, templateId);
+        _signUrl = null;
+        _step = Step.Preview;
+        _info = _result.Vehicle.InvoiceNumber is int n
+            ? $"Recibo #{n} ({_result.Template.Name}). Envía el enlace de firma al vendedor."
+            : $"Recibo generado ({_result.Template.Name}).";
+    }
+
+    private void StartRegenerate()
+    {
+        if (_busy || _result is null) return;
+        _error = null;
+        _info = null;
+        _adminPassword = string.Empty;
+        _step = Step.ConfirmRegenerate;
+    }
+
+    private void CancelRegenerate()
+    {
+        if (_busy) return;
+        _adminPassword = string.Empty;
+        _step = Step.Preview;
+    }
+
+    private async Task ConfirmRegenerateAsync()
+    {
+        if (_busy || string.IsNullOrEmpty(_adminPassword)) return;
+        _error = null;
+        _busy = true;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                await Invoices.BeginRegenerateAsync(_vehicleId, _adminPassword);
+                _adminPassword = string.Empty;
+                _signUrl = null;
+                await GenerateWithSuggestedTemplateAsync();
+            }, "Regenerando recibo…");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Toasts.Error(ex.Message);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SendEmailAsync()
+    {
+        if (_result is null || _busy || !CanEmailSigned) return;
+        _error = null;
+        _busy = _busyEmail = true;
+        try
+        {
+            await Invoices.SendSignedEmailAsync(_result);
+            _info = $"Recibo firmado enviado a {_result.Vehicle.SellerEmail}.";
+            Toasts.Success(_info);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Toasts.Error(ex.Message);
+        }
+        finally
+        {
+            _busy = _busyEmail = false;
+        }
+    }
+
+    private async Task SendForSignatureAsync()
+    {
+        if (_result is null || _busy || !CanSign) return;
+        _error = null;
+        _copied = false;
+        _busy = _busySign = true;
+        try
+        {
+            var sign = await Invoices.SendSigningLinkAsync(_result);
+            _signUrl = sign.SellerSigningUrl;
+            _result = await Invoices.TryLoadExistingAsync(_vehicleId) ?? _result;
+
+            if (HasSellerEmail && Invoices.CanEmail)
+            {
+                _info = $"Enlace de firma enviado a {_result.Vehicle.SellerEmail} (DocuSeal #{sign.SubmissionId}). También puedes copiarlo abajo.";
+            }
+            else
+            {
+                _info = $"Enlace de firma listo (DocuSeal #{sign.SubmissionId}). Cópialo y compártelo con el vendedor; el PDF descargado no registra la firma.";
+            }
+
+            Toasts.Success(_info);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Toasts.Error(ex.Message);
+        }
+        finally
+        {
+            _busy = _busySign = false;
+        }
+    }
+
+    private async Task CopySignUrlAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_signUrl)) return;
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", _signUrl);
+            _copied = true;
+            Toasts.Success("Enlace de firma copiado.");
+            await Task.Delay(2000);
+            _copied = false;
+        }
+        catch
+        {
+            Toasts.Error("No se pudo copiar. Selecciona el enlace y cópialo manualmente.");
+        }
+    }
+
+    private async Task RefreshSignatureAsync()
+    {
+        if (_busy) return;
+        _error = null;
+        _busy = _busyRefresh = true;
+        try
+        {
+            _result = await Invoices.RefreshSignatureStatusAsync(_vehicleId);
+            _signUrl = _result.Vehicle.SellerSigningUrl;
+            _info = _result.IsSigned
+                ? "Firma completada. Ya puedes enviar el recibo firmado por correo."
+                : "Todavía pendiente de firma en DocuSeal.";
+            if (_result.IsSigned)
+                Toasts.Success(_info);
+            else
+                Toasts.Info(_info);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Toasts.Error(ex.Message);
+        }
+        finally
+        {
+            _busy = _busyRefresh = false;
+        }
+    }
+
+    private async Task Close()
+    {
+        if (_busy) return;
+        _open = false;
+        _result = null;
+        _error = null;
+        _info = null;
+        _signUrl = null;
+        _adminPassword = string.Empty;
+        _step = Step.Loading;
+        if (OnClosed.HasDelegate)
+            await OnClosed.InvokeAsync();
+    }
+}

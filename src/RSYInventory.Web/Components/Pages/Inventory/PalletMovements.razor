@@ -1,0 +1,101 @@
+@page "/pallets/{PalletId:int}/movements"
+@inject InventoryService Inventory
+@inject UiBusyService Busy
+
+<PageTitle>Historial de paleta</PageTitle>
+
+<PageHeader Title="@($"Historial · Paleta #{PalletId}")"
+            Eyebrow="Inventario"
+            Lead="Últimos movimientos registrados en esta paleta.">
+    <a class="btn btn-outline-secondary" href="inventory">Volver al inventario</a>
+</PageHeader>
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else if (_movements is null)
+{
+    <div class="page-panel"><p class="mb-0 text-muted">Cargando historial…</p></div>
+}
+else if (_movements.Count == 0)
+{
+    <div class="page-panel empty-state">
+        <p class="empty-state__title">Sin movimientos</p>
+        <p class="mb-0">Todavía no hay actividad registrada en esta paleta.</p>
+    </div>
+}
+else
+{
+    <div class="page-panel table-shell">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>Fecha (UTC)</th>
+                    <th>Usuario</th>
+                    <th>Tipo</th>
+                    <th>Detalle</th>
+                    <th>Notas</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var m in _movements)
+                {
+                    <tr>
+                        <td>@m.MovedAtUtc.ToString("yyyy-MM-dd HH:mm")</td>
+                        <td>@m.User.DisplayName</td>
+                        <td>@FormatMovement((MovementType)m.MovementType)</td>
+                        <td>
+                            @if (m.InventoryItem is not null)
+                            {
+                                <span>@FormatItemType((InventoryItemType)m.InventoryItem.ItemType) #@m.InventoryItemId</span>
+                            }
+                            else if (m.Vehicle is not null)
+                            {
+                                <span>VIN <code>@m.Vehicle.Vin</code></span>
+                            }
+                            <div class="form-hint">
+                                @(m.FromPalletId?.ToString() ?? "—") → @(m.ToPalletId?.ToString() ?? "—")
+                            </div>
+                        </td>
+                        <td>@(string.IsNullOrWhiteSpace(m.Notes) ? "—" : m.Notes)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter] public int PalletId { get; set; }
+
+    private List<InventoryMovement>? _movements;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                _movements = await Inventory.GetPalletMovementsAsync(PalletId);
+            }, "Cargando historial…");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private static string FormatMovement(MovementType type) => type switch
+    {
+        MovementType.Relocated => "Reubicado",
+        MovementType.Sold => "Vendido",
+        MovementType.Assigned => "Asignado",
+        MovementType.Acquired => "Adquirido",
+        _ => type.ToString()
+    };
+
+    private static string FormatItemType(InventoryItemType type) =>
+        type == InventoryItemType.Engine ? "Motor" : "Transmisión";
+}

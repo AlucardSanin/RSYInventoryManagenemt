@@ -1,0 +1,39 @@
+@inject ToastService Toasts
+@implements IDisposable
+
+<div class="toast-host" aria-live="polite" aria-relevant="additions">
+    @foreach (var toast in Toasts.Items)
+    {
+        var kindClass = toast.Kind switch
+        {
+            ToastKind.Success => "app-toast--success",
+            ToastKind.Error => "app-toast--error",
+            _ => "app-toast--info"
+        };
+        var title = toast.Kind switch
+        {
+            ToastKind.Success => "Listo",
+            ToastKind.Error => "Error",
+            _ => "Aviso"
+        };
+
+        <div class="app-toast @kindClass" role="status">
+            <div class="app-toast__body">
+                <strong class="app-toast__title">@title</strong>
+                <p class="app-toast__text">@toast.Text</p>
+            </div>
+            <button type="button" class="app-toast__close" aria-label="Cerrar" @onclick="@(() => Toasts.Dismiss(toast.Id))">×</button>
+        </div>
+    }
+</div>
+
+@code {
+    protected override void OnInitialized()
+        => Toasts.Changed += OnChanged;
+
+    private void OnChanged()
+        => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+        => Toasts.Changed -= OnChanged;
+}

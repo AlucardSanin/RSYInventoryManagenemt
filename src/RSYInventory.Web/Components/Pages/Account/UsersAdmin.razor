@@ -1,0 +1,294 @@
+@page "/users"
+@inject UserAdminService Users
+@inject ICurrentUserService CurrentUser
+@inject UiBusyService Busy
+@inject NavigationManager Nav
+
+<PageTitle>Usuarios</PageTitle>
+
+<PageHeader Title="Usuarios y accesos"
+            Eyebrow="Administración"
+            Lead="Solo el usuario god puede crear cuentas y elegir qué funciones tendrá cada persona." />
+
+@if (!_ready)
+{
+    <div class="page-panel"><p class="mb-0 text-muted">Cargando…</p></div>
+}
+else if (!CurrentUser.CanManageUsers)
+{
+    <div class="alert alert-warning">No tienes permiso para gestionar usuarios.</div>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-danger">@_error</div>
+    }
+    @if (!string.IsNullOrEmpty(_ok))
+    {
+        <div class="alert alert-success">@_ok</div>
+    }
+
+    <div class="page-panel">
+        <h2 class="page-panel__title">@(_editingId is null ? "Crear usuario" : $"Editar: {_editUserName}")</h2>
+        <div class="row g-3">
+            @if (_editingId is null)
+            {
+                <div class="col-md-4">
+                    <label class="form-label">Usuario *</label>
+                    <input class="form-control" @bind="_userName" autocomplete="off" />
+                </div>
+            }
+            <div class="col-md-4">
+                <label class="form-label">Nombre para mostrar *</label>
+                <input class="form-control" @bind="_displayName" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Email</label>
+                <input class="form-control" @bind="_email" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">@(_editingId is null ? "Contraseña *" : "Nueva contraseña (opcional)")</label>
+                <input type="password" class="form-control" @bind="_password" autocomplete="new-password" placeholder="@(_editingId is null ? "" : "Dejar vacío para no cambiar")" />
+            </div>
+            @if (_editingId is not null)
+            {
+                <div class="col-md-4 d-flex align-items-end">
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="active" @bind="_isActive" />
+                        <label class="form-check-label" for="active">Usuario activo</label>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <h3 class="h6 mt-4 mb-2">Niveles de acceso / funciones</h3>
+        <p class="form-hint mb-2">Marca una o más funciones según lo que podrá hacer en la yarda.</p>
+        <div class="row g-2 mb-3">
+            @foreach (var role in _roles)
+            {
+                var code = (AppRole)role.Code;
+                <div class="col-md-6">
+                    <label class="choice-card @(_selectedRoles.Contains(code) ? "is-selected" : null)">
+                        <input type="checkbox"
+                               checked="@_selectedRoles.Contains(code)"
+                               @onchange="e => ToggleRole(code, (bool)(e.Value ?? false))" />
+                        <strong>@RoleTitle(code)</strong>
+                        <span>@RoleHelp(code)</span>
+                    </label>
+                </div>
+            }
+        </div>
+
+        <div class="form-actions">
+            <button class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">
+                @(_busy ? "Guardando…" : _editingId is null ? "Crear usuario" : "Guardar cambios")
+            </button>
+            @if (_editingId is not null)
+            {
+                <button type="button" class="btn btn-outline-secondary" @onclick="CancelEdit">Cancelar edición</button>
+            }
+        </div>
+    </div>
+
+    <div class="page-panel table-shell">
+        <h2 class="page-panel__title">Usuarios existentes</h2>
+        @if (_users.Count == 0)
+        {
+            <p class="mb-0 text-muted">No hay usuarios.</p>
+        }
+        else
+        {
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Usuario</th>
+                        <th>Nombre</th>
+                        <th>Accesos</th>
+                        <th>Estado</th>
+                        <th class="text-end">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var u in _users)
+                    {
+                        <tr>
+                            <td><code>@u.UserName</code></td>
+                            <td>
+                                <strong>@u.DisplayName</strong>
+                                @if (!string.IsNullOrWhiteSpace(u.Email))
+                                {
+                                    <div class="form-hint">@u.Email</div>
+                                }
+                            </td>
+                            <td>
+                                <div class="d-flex flex-wrap gap-1">
+                                    @foreach (var role in u.Roles)
+                                    {
+                                        <span class="badge-status badge-status--parts">@RoleTitle(role)</span>
+                                    }
+                                </div>
+                            </td>
+                            <td>
+                                @if (u.IsActive)
+                                {
+                                    <span class="badge-status badge-status--ok">Activo</span>
+                                }
+                                else
+                                {
+                                    <span class="badge-status badge-status--warn">Inactivo</span>
+                                }
+                            </td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-outline-primary" @onclick="() => BeginEdit(u)">Editar</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+}
+
+@code {
+    private bool _ready;
+    private bool _busy;
+    private string? _error;
+    private string? _ok;
+    private List<Role> _roles = [];
+    private List<UserListItem> _users = [];
+    private readonly HashSet<AppRole> _selectedRoles = [];
+
+    private int? _editingId;
+    private string _editUserName = string.Empty;
+    private string _userName = string.Empty;
+    private string _displayName = string.Empty;
+    private string _email = string.Empty;
+    private string _password = string.Empty;
+    private bool _isActive = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CurrentUser.IsAuthenticated)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        if (!CurrentUser.CanManageUsers)
+        {
+            _ready = true;
+            return;
+        }
+
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                _roles = await Users.GetAssignableRolesAsync();
+                _users = await Users.GetUsersAsync();
+            }, "Cargando usuarios…");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+
+        _ready = true;
+    }
+
+    private void ToggleRole(AppRole role, bool selected)
+    {
+        if (selected) _selectedRoles.Add(role);
+        else _selectedRoles.Remove(role);
+    }
+
+    private void BeginEdit(UserListItem user)
+    {
+        _editingId = user.Id;
+        _editUserName = user.UserName;
+        _displayName = user.DisplayName;
+        _email = user.Email ?? string.Empty;
+        _password = string.Empty;
+        _isActive = user.IsActive;
+        _selectedRoles.Clear();
+        foreach (var r in user.Roles)
+            _selectedRoles.Add(r);
+        _ok = null;
+        _error = null;
+    }
+
+    private void CancelEdit()
+    {
+        _editingId = null;
+        _editUserName = string.Empty;
+        _userName = string.Empty;
+        _displayName = string.Empty;
+        _email = string.Empty;
+        _password = string.Empty;
+        _isActive = true;
+        _selectedRoles.Clear();
+    }
+
+    private async Task SaveAsync()
+    {
+        if (Busy.IsBusy || _busy) return;
+        _error = null;
+        _ok = null;
+        _busy = true;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                if (_editingId is null)
+                {
+                    await Users.CreateUserAsync(_userName, _displayName, _email, _password, _selectedRoles.ToList());
+                    _ok = "Usuario creado.";
+                    CancelEdit();
+                }
+                else
+                {
+                    await Users.UpdateUserAsync(
+                        _editingId.Value,
+                        _displayName,
+                        _email,
+                        _isActive,
+                        _selectedRoles.ToList(),
+                        string.IsNullOrWhiteSpace(_password) ? null : _password);
+                    _ok = "Usuario actualizado.";
+                    CancelEdit();
+                }
+
+                _users = await Users.GetUsersAsync();
+            }, _editingId is null ? "Creando usuario…" : "Guardando usuario…");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string RoleTitle(AppRole role) => role switch
+    {
+        AppRole.InventoryViewer => "Solo ver inventario y vehículos",
+        AppRole.InventoryEditor => "Editar inventario",
+        AppRole.ZoneManager => "Gestionar zonas",
+        AppRole.VehicleAcquirer => "Adquirir vehículos",
+        AppRole.SystemAdmin => "God / System Admin",
+        _ => role.ToString()
+    };
+
+    private static string RoleHelp(AppRole role) => role switch
+    {
+        AppRole.InventoryViewer => "Consulta piezas, ubicaciones y vehículos adquiridos; no modifica.",
+        AppRole.InventoryEditor => "Alta, mover/vender piezas y ubicar vehículos.",
+        AppRole.ZoneManager => "Crear y ajustar zonas, filas y paletas (incluye editar inventario).",
+        AppRole.VehicleAcquirer => "Registrar/editar vehículos, fotos y recibos de compra; no asigna paleta.",
+        AppRole.SystemAdmin => "Crear usuarios y asignar niveles de acceso.",
+        _ => string.Empty
+    };
+}

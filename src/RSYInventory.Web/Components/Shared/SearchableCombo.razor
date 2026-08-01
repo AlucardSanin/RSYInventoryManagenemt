@@ -1,0 +1,332 @@
+@* Typeahead combobox: filter-as-you-type + optional free text (mobile-friendly). *@
+
+<div class="search-combo @(_open ? "is-open" : null) @(Disabled ? "is-disabled" : null)"
+     @onfocusin="OnFocusIn"
+     @onfocusout="OnFocusOutAsync">
+    <div class="search-combo__field">
+        <input class="form-control search-combo__input @(CssClass)"
+               value="@_query"
+               @oninput="OnInputAsync"
+               @onkeydown="OnKeyDownAsync"
+               @onfocus="Open"
+               placeholder="@Placeholder"
+               disabled="@Disabled"
+               autocomplete="off"
+               autocorrect="off"
+               autocapitalize="off"
+               spellcheck="false"
+               role="combobox"
+               aria-autocomplete="list"
+               aria-expanded="@_open.ToString().ToLowerInvariant()"
+               aria-controls="@_listId"
+               id="@InputId" />
+        <button type="button"
+                class="search-combo__chevron"
+                tabindex="-1"
+                disabled="@Disabled"
+                aria-label="Mostrar opciones"
+                @onclick="ToggleAsync"
+                @onmousedown:preventDefault>
+            <span aria-hidden="true"></span>
+        </button>
+    </div>
+
+    @if (_open && !Disabled)
+    {
+        <ul id="@_listId" class="search-combo__menu" role="listbox">
+            @if (_filtered.Count == 0)
+            {
+                <li class="search-combo__empty" role="presentation">
+                    @if (!string.IsNullOrWhiteSpace(EmptyHint))
+                    {
+                        <span>@EmptyHint</span>
+                    }
+                    else if (AllowCustom && !string.IsNullOrWhiteSpace(_query))
+                    {
+                        <span>Usar “@_query.Trim()”</span>
+                    }
+                    else if (Options.Count == 0)
+                    {
+                        <span>Sin sugerencias. Puedes escribir el valor.</span>
+                    }
+                    else
+                    {
+                        <span>Sin coincidencias</span>
+                    }
+                </li>
+            }
+            else
+            {
+                @for (var i = 0; i < _filtered.Count; i++)
+                {
+                    var option = _filtered[i];
+                    var index = i;
+                    <li role="option"
+                        class="search-combo__option @(index == _activeIndex ? "is-active" : null) @(IsSelected(option) ? "is-selected" : null)"
+                        aria-selected="@IsSelected(option).ToString().ToLowerInvariant()"
+                        @onmousedown:preventDefault
+                        @onclick="() => SelectAsync(option)">
+                        @option.Label
+                    </li>
+                }
+                @if (_showingPartialList)
+                {
+                    <li class="search-combo__empty" role="presentation">
+                        <span>Escribe para filtrar más…</span>
+                    </li>
+                }
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    private readonly string _listId = $"combo-{Guid.NewGuid():N}";
+    private string _query = string.Empty;
+    private string? _boundValue;
+    private bool _open;
+    private bool _editing;
+    private bool _browseAllOnOpen;
+    private bool _showingPartialList;
+    private int _activeIndex = -1;
+    private int _focusDepth;
+    private int _optionsVersion = -1;
+    private List<ComboOption> _filtered = [];
+
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public IReadOnlyList<ComboOption> Options { get; set; } = [];
+    [Parameter] public string? Placeholder { get; set; }
+    [Parameter] public string? EmptyHint { get; set; }
+    [Parameter] public bool AllowCustom { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public string? CssClass { get; set; }
+    [Parameter] public string? InputId { get; set; }
+    [Parameter] public int MaxSuggestions { get; set; } = 40;
+
+    protected override void OnParametersSet()
+    {
+        // Count alone isn't enough if same count different items; also track identity via hash of count + first/last.
+        var options = Options ?? [];
+        var version = options.Count;
+        if (options.Count > 0)
+            version = HashCode.Combine(options.Count, options[0].Value, options[^1].Value);
+
+        var optionsChanged = version != _optionsVersion;
+        _optionsVersion = version;
+
+        if (!_editing && Value != _boundValue)
+        {
+            _boundValue = Value;
+            _query = ResolveDisplay(Value);
+            _browseAllOnOpen = true;
+        }
+
+        if (optionsChanged || !_editing)
+            RefreshFilter(keepOpen: _open);
+    }
+
+    private string ResolveDisplay(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+        var match = Options.FirstOrDefault(o => string.Equals(o.Value, value, StringComparison.OrdinalIgnoreCase));
+        return match?.Label ?? value;
+    }
+
+    private bool IsSelected(ComboOption option)
+        => !string.IsNullOrEmpty(Value)
+           && string.Equals(option.Value, Value, StringComparison.OrdinalIgnoreCase);
+
+    private void Open()
+    {
+        if (Disabled) return;
+        _open = true;
+
+        // Opening with a committed selection: show the catalog (not a 1-item filter).
+        var display = ResolveDisplay(Value);
+        if (!_editing
+            && (_browseAllOnOpen
+                || string.IsNullOrWhiteSpace(_query)
+                || string.Equals(_query.Trim(), display, StringComparison.OrdinalIgnoreCase)))
+        {
+            _browseAllOnOpen = false;
+            ShowBrowseList();
+            return;
+        }
+
+        RefreshFilter(keepOpen: true);
+    }
+
+    private async Task ToggleAsync()
+    {
+        if (Disabled) return;
+        if (_open)
+        {
+            _open = false;
+            return;
+        }
+
+        _browseAllOnOpen = true;
+        Open();
+        await Task.CompletedTask;
+    }
+
+    private void OnFocusIn() => _focusDepth++;
+
+    private async Task OnFocusOutAsync()
+    {
+        _focusDepth = Math.Max(0, _focusDepth - 1);
+        await Task.Delay(160);
+        if (_focusDepth > 0) return;
+
+        _open = false;
+        _editing = false;
+        _browseAllOnOpen = true;
+        await CommitQueryAsync();
+    }
+
+    private async Task OnInputAsync(ChangeEventArgs e)
+    {
+        _editing = true;
+        _browseAllOnOpen = false;
+        _query = e.Value?.ToString() ?? string.Empty;
+        _open = true;
+        RefreshFilter(keepOpen: true);
+
+        if (AllowCustom)
+            await SetValueAsync(string.IsNullOrWhiteSpace(_query) ? null : _query.Trim());
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (Disabled) return;
+
+        switch (e.Key)
+        {
+            case "ArrowDown":
+                Open();
+                if (_filtered.Count == 0) return;
+                _activeIndex = Math.Min(_filtered.Count - 1, _activeIndex + 1);
+                break;
+            case "ArrowUp":
+                if (_filtered.Count == 0) return;
+                _activeIndex = Math.Max(0, _activeIndex - 1);
+                break;
+            case "Enter":
+                if (_open && _activeIndex >= 0 && _activeIndex < _filtered.Count)
+                {
+                    await SelectAsync(_filtered[_activeIndex]);
+                    return;
+                }
+                _open = false;
+                await CommitQueryAsync();
+                break;
+            case "Escape":
+                _open = false;
+                _editing = false;
+                _browseAllOnOpen = true;
+                _query = ResolveDisplay(Value);
+                break;
+        }
+    }
+
+    private async Task SelectAsync(ComboOption option)
+    {
+        _editing = false;
+        _open = false;
+        _browseAllOnOpen = true;
+        _query = option.Label;
+        _activeIndex = -1;
+        await SetValueAsync(option.Value);
+    }
+
+    private async Task CommitQueryAsync()
+    {
+        var typed = _query.Trim();
+
+        if (string.IsNullOrEmpty(typed))
+        {
+            await SetValueAsync(null);
+            _query = string.Empty;
+            return;
+        }
+
+        var exact = Options.FirstOrDefault(o =>
+            string.Equals(o.Label, typed, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(o.Value, typed, StringComparison.OrdinalIgnoreCase));
+
+        if (exact is not null)
+        {
+            _query = exact.Label;
+            await SetValueAsync(exact.Value);
+            return;
+        }
+
+        if (AllowCustom)
+        {
+            await SetValueAsync(typed);
+            return;
+        }
+
+        _query = ResolveDisplay(Value);
+    }
+
+    private async Task SetValueAsync(string? value)
+    {
+        if (string.Equals(Value, value, StringComparison.Ordinal))
+        {
+            _boundValue = value;
+            return;
+        }
+
+        _boundValue = value;
+        await ValueChanged.InvokeAsync(value);
+    }
+
+    private void ShowBrowseList()
+    {
+        var max = Math.Max(1, MaxSuggestions);
+        _filtered = Options.Take(max).ToList();
+        _showingPartialList = Options.Count > _filtered.Count;
+        _activeIndex = -1;
+    }
+
+    private void RefreshFilter(bool keepOpen)
+    {
+        var q = _query.Trim();
+        IEnumerable<ComboOption> source = Options;
+
+        if (!string.IsNullOrEmpty(q))
+        {
+            source = Options.Where(o =>
+                o.Haystack.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || o.Value.Contains(q, StringComparison.OrdinalIgnoreCase));
+            _showingPartialList = false;
+        }
+        else
+        {
+            _showingPartialList = Options.Count > MaxSuggestions;
+        }
+
+        var max = Math.Max(1, MaxSuggestions);
+        var list = source.Take(max + 1).ToList();
+        if (string.IsNullOrEmpty(q) && list.Count > max)
+        {
+            _showingPartialList = true;
+            _filtered = list.Take(max).ToList();
+        }
+        else
+        {
+            if (!string.IsNullOrEmpty(q))
+                _showingPartialList = list.Count > max;
+            _filtered = list.Take(max).ToList();
+        }
+
+        if (!keepOpen)
+            _activeIndex = -1;
+        else if (_filtered.Count == 0)
+            _activeIndex = -1;
+        else if (_activeIndex >= _filtered.Count)
+            _activeIndex = 0;
+    }
+}

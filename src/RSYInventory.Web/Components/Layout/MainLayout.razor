@@ -1,0 +1,110 @@
+﻿@inherits LayoutComponentBase
+@inject AuthService Auth
+@inject ICurrentUserService CurrentUser
+@inject UiBusyService Busy
+@inject NavigationManager Nav
+
+<div class="page">
+    <div class="sidebar">
+        <NavMenu Ready="_ready" />
+    </div>
+
+    <main>
+        <div class="top-row px-4">
+            <div class="user-chip ms-auto d-flex align-items-center gap-2">
+                @if (!_ready)
+                {
+                    <span>Cargando sesión…</span>
+                }
+                else if (!CurrentUser.IsAuthenticated)
+                {
+                    <a class="btn btn-sm btn-primary" href="login">Iniciar sesión</a>
+                }
+                else
+                {
+                    <span>Sesión:</span>
+                    <strong>@CurrentUser.DisplayName</strong>
+                    @if (CurrentUser.CanManageUsers)
+                    {
+                        <span class="badge-status badge-status--parts">God</span>
+                    }
+                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busy || Busy.IsBusy)" @onclick="LogoutAsync">
+                        Cerrar sesión
+                    </button>
+                }
+            </div>
+        </div>
+
+        <article class="content px-4">
+            @if (!_ready)
+            {
+                <div class="page-panel"><p class="mb-0 text-muted">Preparando sesión…</p></div>
+            }
+            else
+            {
+                @Body
+            }
+        </article>
+    </main>
+
+    <BusyOverlay />
+    <ToastHost />
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    Ocurrió un error inesperado.
+    <a href="." class="reload">Recargar</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@code {
+    private bool _ready;
+    private bool _busy;
+    private bool _initStarted;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _initStarted)
+            return;
+
+        _initStarted = true;
+
+        try
+        {
+            using (Busy.Begin("Iniciando sesión…"))
+            {
+                await Auth.RestoreAsync();
+            }
+        }
+        catch
+        {
+            // UI must unlock even if auth/DB fails.
+        }
+        finally
+        {
+            _ready = true;
+            // Already on the renderer sync context; avoid nested InvokeAsync.
+            StateHasChanged();
+        }
+    }
+
+    private async Task LogoutAsync()
+    {
+        if (_busy || Busy.IsBusy)
+            return;
+
+        _busy = true;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                await Auth.LogoutAsync();
+                Nav.NavigateTo("/login", forceLoad: true);
+            }, "Cerrando sesión…");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

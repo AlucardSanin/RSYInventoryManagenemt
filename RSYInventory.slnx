@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/RSYInventory.Data/RSYInventory.Data.csproj" />
+    <Project Path="src/RSYInventory.Mobile/RSYInventory.Mobile.csproj" />
+    <Project Path="src/RSYInventory.Web/RSYInventory.Web.csproj" />
+  </Folder>
+  <Folder Name="/resources/">
+    <File Path="resources/Database/001_InitialSchema.sql" />
+    <File Path="resources/Database/002_DemoUserAndPartsZone.sql" />
+    <File Path="resources/Database/scaffold-command.txt" />
+    <File Path="resources/Database/README.md" />
+  </Folder>
+</Solution>

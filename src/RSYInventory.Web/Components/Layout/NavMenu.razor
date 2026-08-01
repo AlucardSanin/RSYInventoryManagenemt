@@ -1,0 +1,123 @@
+﻿<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand d-flex align-items-center gap-2" href="">
+            <img src="brand-logo.png" alt="RSY" class="brand-logo" width="32" height="32" />
+            <span>RSY Yard</span>
+        </a>
+    </div>
+</div>
+
+<input type="checkbox" title="Menú de navegación" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="nav flex-column">
+        @if (!Ready || CurrentUser is null || !CurrentUser.IsAuthenticated)
+        {
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="buscar">
+                    <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Buscar inventario
+                </NavLink>
+            </div>
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="login">
+                    <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Iniciar sesión
+                </NavLink>
+            </div>
+        }
+        else
+        {
+            <p class="nav-section">Inicio</p>
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                    <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Panel
+                </NavLink>
+            </div>
+
+            @if (CurrentUser.CanViewInventory || CurrentUser.CanEditInventory)
+            {
+                <p class="nav-section">Trabajo diario</p>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="inventory">
+                        <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Inventario
+                    </NavLink>
+                </div>
+                @if (CurrentUser.CanEditInventory)
+                {
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="inventory/new">
+                            <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Añadir pieza
+                        </NavLink>
+                    </div>
+                }
+            }
+
+            @if (CurrentUser.CanViewVehicles)
+            {
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="vehicles">
+                        <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Vehículos
+                    </NavLink>
+                </div>
+                @if (CurrentUser.CanAcquireVehicles)
+                {
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="vehicles/acquire">
+                            <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Registrar compra
+                        </NavLink>
+                    </div>
+                }
+            }
+
+            @if (CurrentUser.CanManageZones || CurrentUser.CanManageUsers)
+            {
+                <p class="nav-section">Configuración</p>
+                @if (CurrentUser.CanManageZones)
+                {
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="zones">
+                            <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Zonas y paletas
+                        </NavLink>
+                    </div>
+                }
+                @if (CurrentUser.CanManageUsers)
+                {
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="users">
+                            <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Usuarios
+                        </NavLink>
+                    </div>
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="admin/activity">
+                            <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Log de actividad
+                        </NavLink>
+                    </div>
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="admin/invoice-templates">
+                            <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Plantillas de recibo
+                        </NavLink>
+                    </div>
+                }
+            }
+
+            <p class="nav-section">Cuenta</p>
+            <div class="nav-item px-3">
+                <button type="button" class="nav-link" @onclick="LogoutClick">
+                    <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Cerrar sesión
+                </button>
+            </div>
+        }
+    </nav>
+</div>
+
+@code {
+    [Parameter] public bool Ready { get; set; }
+    [Inject] private ICurrentUserService CurrentUser { get; set; } = default!;
+    [Inject] private AuthService Auth { get; set; } = default!;
+    [Inject] private NavigationManager Nav { get; set; } = default!;
+
+    private async Task LogoutClick()
+    {
+        await Auth.LogoutAsync();
+        Nav.NavigateTo("/login");
+    }
+}

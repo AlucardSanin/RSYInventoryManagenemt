@@ -1,0 +1,78 @@
+@page "/login"
+@layout LoginLayout
+@inject AuthService Auth
+@inject UiBusyService Busy
+@inject NavigationManager Nav
+
+<PageTitle>Iniciar sesión · RSY Yard</PageTitle>
+
+<div class="page-panel login-card">
+    <div class="login-brand mb-3">
+        <img src="brand-logo.png" alt="RSY Yard" class="login-brand__logo" width="72" height="72" />
+        <p class="page-header__eyebrow mb-0">RSY Yard Inventory</p>
+    </div>
+    <h1 class="page-header__title mb-2">Iniciar sesión</h1>
+    <p class="page-header__lead mb-3">Entra con tu usuario.</p>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-danger">@_error</div>
+    }
+
+    <p class="mb-3">
+        <a href="buscar">Buscar inventario sin iniciar sesión →</a>
+    </p>
+
+    <EditForm Model="_model" OnValidSubmit="LoginAsync">
+        <div class="mb-3">
+            <label class="form-label">Usuario</label>
+            <InputText class="form-control" @bind-Value="_model.UserName" autocomplete="username" />
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Contraseña</label>
+            <input type="password" class="form-control" @bind="_model.Password" autocomplete="current-password" />
+        </div>
+        <button type="submit" class="btn btn-primary w-100" disabled="@_busy">
+            @(_busy ? "Entrando…" : "Entrar")
+        </button>
+    </EditForm>
+
+    <p class="form-hint mt-3 mb-0">
+        Si no tienes cuenta contacta al administrador
+    </p>
+</div>
+
+@code {
+    private readonly LoginModel _model = new() { UserName = "" };
+    private string? _error;
+    private bool _busy;
+
+    private async Task LoginAsync()
+    {
+        if (Busy.IsBusy || _busy) return;
+        _error = null;
+        _busy = true;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                await Auth.LoginAsync(_model.UserName ?? string.Empty, _model.Password ?? string.Empty);
+                Nav.NavigateTo("/", forceLoad: true);
+            }, "Entrando…");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private sealed class LoginModel
+    {
+        public string? UserName { get; set; }
+        public string? Password { get; set; }
+    }
+}

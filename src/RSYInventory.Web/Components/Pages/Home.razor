@@ -1,0 +1,98 @@
+﻿@page "/"
+@inject ICurrentUserService CurrentUser
+
+<PageTitle>Panel · RSY Yard</PageTitle>
+
+<PageHeader Title="¿Qué quieres hacer?"
+            Eyebrow="RSY Yard Inventory"
+            Lead="Atajos según tu nivel de acceso. El menú solo muestra lo que puedes usar." />
+
+@if (!CurrentUser.IsAuthenticated)
+{
+    <div class="page-panel mb-3">
+        <p class="mb-2">Puedes consultar piezas disponibles sin cuenta, o iniciar sesión para trabajar en la yarda.</p>
+        <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-primary" href="buscar">Buscar inventario</a>
+            <a class="btn btn-outline-secondary" href="login">Iniciar sesión</a>
+        </div>
+    </div>
+}
+else
+{
+    <div class="page-panel mb-4">
+        <p class="mb-0 meta-row">
+            <span>Conectado como <strong>@CurrentUser.DisplayName</strong> (<code>@CurrentUser.UserName</code>)</span>
+            @if (CurrentUser.CanManageUsers)
+            {
+                <span>·</span>
+                <span class="badge-status badge-status--parts">God</span>
+            }
+        </p>
+    </div>
+
+    <div class="task-grid">
+        @if (CurrentUser.CanViewInventory)
+        {
+            <a class="task-card" href="inventory">
+                <p class="task-card__kicker">Inventario</p>
+                <h2 class="task-card__title">Ver piezas disponibles</h2>
+                <p class="task-card__text">Consulta motores y transmisiones por paleta.</p>
+                <p class="task-card__cta">Ir al inventario →</p>
+            </a>
+        }
+
+        @if (CurrentUser.CanEditInventory)
+        {
+            <a class="task-card" href="inventory/new">
+                <p class="task-card__kicker">Inventario</p>
+                <h2 class="task-card__title">Añadir motor o transmisión</h2>
+                <p class="task-card__text">Registra una pieza nueva y asígnala a una paleta.</p>
+                <p class="task-card__cta">Añadir pieza →</p>
+            </a>
+        }
+
+        @if (CurrentUser.CanAcquireVehicles)
+        {
+            <a class="task-card" href="vehicles/acquire">
+                <p class="task-card__kicker">Vehículos</p>
+                <h2 class="task-card__title">Registrar compra</h2>
+                <p class="task-card__text">Captura VIN, fuente y datos del vehículo.</p>
+                <p class="task-card__cta">Registrar adquisición →</p>
+            </a>
+        }
+
+        @if (CurrentUser.CanViewVehicles)
+        {
+            <a class="task-card" href="vehicles">
+                <p class="task-card__kicker">Vehículos</p>
+                <h2 class="task-card__title">@(CurrentUser.CanEditInventory || CurrentUser.CanAcquireVehicles ? "Ubicar vehículos" : "Ver vehículos adquiridos")</h2>
+                <p class="task-card__text">
+                    @(CurrentUser.CanEditInventory || CurrentUser.CanAcquireVehicles
+                        ? "Lista de adquisiciones y asignación de paleta."
+                        : "Consulta la lista y el detalle de vehículos (solo lectura).")
+                </p>
+                <p class="task-card__cta">Ver vehículos →</p>
+            </a>
+        }
+
+        @if (CurrentUser.CanManageZones)
+        {
+            <a class="task-card" href="zones">
+                <p class="task-card__kicker">Yarda</p>
+                <h2 class="task-card__title">Zonas y paletas</h2>
+                <p class="task-card__text">Crea o ajusta filas y paletas.</p>
+                <p class="task-card__cta">Gestionar zonas →</p>
+            </a>
+        }
+
+        @if (CurrentUser.CanManageUsers)
+        {
+            <a class="task-card" href="users">
+                <p class="task-card__kicker">Administración</p>
+                <h2 class="task-card__title">Usuarios y accesos</h2>
+                <p class="task-card__text">Crea cuentas y elige qué puede hacer cada persona.</p>
+                <p class="task-card__cta">Gestionar usuarios →</p>
+            </a>
+        }
+    </div>
+}

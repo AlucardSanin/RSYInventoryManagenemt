@@ -1,0 +1,36 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+*.nupkg
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+## IDE
+.idea/
+*.swp
+*~
+
+## OS
+.DS_Store
+Thumbs.db
+
+## Secrets / local
+appsettings.*.local.json
+*.pfx
+src/RSYInventory.Web/dataprotection-keys/
+
+## Uploaded media (keep folder structure)
+src/RSYInventory.Web/wwwroot/uploads/**
+!src/RSYInventory.Web/wwwroot/uploads/.gitkeep
+!src/RSYInventory.Web/wwwroot/uploads/**/.gitkeep
+
+## MAUI / Android
+*.apk
+*.aab
+*.ipa

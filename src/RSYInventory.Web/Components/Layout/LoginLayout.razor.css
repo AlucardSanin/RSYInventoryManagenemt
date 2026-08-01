@@ -1,0 +1,13 @@
+.login-shell {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 1.5rem;
+    background:
+        radial-gradient(circle at top right, rgba(15, 118, 110, 0.16), transparent 34%),
+        linear-gradient(160deg, #15202b 0%, #1f3144 45%, #0f766e 140%);
+}
+
+.login-shell__panel {
+    width: min(100%, 420px);
+}
