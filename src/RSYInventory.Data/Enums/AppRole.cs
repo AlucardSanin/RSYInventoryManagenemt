@@ -18,5 +18,8 @@ public enum AppRole
     VehicleAcquirer = 4,
 
     /// <summary>God / system admin: create users and assign roles. Demo user has this role.</summary>
-    SystemAdmin = 5
+    SystemAdmin = 5,
+
+    /// <summary>Driver / chofer: passwordless pickup agenda via personal link only.</summary>
+    Driver = 6
 }

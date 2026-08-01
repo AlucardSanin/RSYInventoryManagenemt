@@ -1,0 +1,293 @@
+@page "/vehicles/pickups"
+@inject PickupScheduleService Schedules
+@inject ICurrentUserService CurrentUser
+@inject UiBusyService Busy
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Agenda de recolección</PageTitle>
+
+<PageHeader Title="Agenda de recolección de vehículos"
+            Eyebrow="Trabajo diario"
+            Lead="Programa recogidas, asigna chofer y genera reportes. Los marcados como recogidos pasan a Adquiridos a las 12:00 (hora de Carolina del Norte).">
+    @if (CurrentUser.CanManagePickupSchedule)
+    {
+        <a class="btn btn-primary" href="vehicles/pickups/new">Agendar recolección</a>
+    }
+</PageHeader>
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+@if (!CurrentUser.CanManagePickupSchedule)
+{
+    <div class="alert alert-warning">No tienes permiso para ver la agenda de recolección.</div>
+}
+else if (_items is null)
+{
+    <div class="page-panel"><p class="mb-0 text-muted">Cargando agenda…</p></div>
+}
+else
+{
+    <div class="page-panel mb-3">
+        <h2 class="page-panel__title">Reporte por chofer</h2>
+        <div class="row g-2 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label">Chofer</label>
+                <select class="form-select" @bind="_reportDriverId">
+                    <option value="0">Todos</option>
+                    @foreach (var d in _drivers)
+                    {
+                        <option value="@d.Id">@d.DisplayName</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Desde</label>
+                <InputDate class="form-control" @bind-Value="_reportFrom" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Hasta</label>
+                <InputDate class="form-control" @bind-Value="_reportTo" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Incluir</label>
+                <select class="form-select" @bind="_reportMode">
+                    <option value="both">Pendientes y recogidos</option>
+                    <option value="pending">Solo pendientes</option>
+                    <option value="picked">Solo recogidos</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <button type="button" class="btn btn-outline-primary w-100" @onclick="RunReportAsync" disabled="@Busy.IsBusy">
+                    Generar
+                </button>
+            </div>
+        </div>
+
+        @if (_report is not null)
+        {
+            <div class="table-shell mt-3">
+                @if (_report.Count == 0)
+                {
+                    <p class="mb-0 text-muted">Sin resultados para ese filtro.</p>
+                }
+                else
+                {
+                    <table class="table table-sm table-hover align-middle">
+                        <thead>
+                            <tr>
+                                <th>Chofer</th>
+                                <th>VIN</th>
+                                <th>Año / Modelo</th>
+                                <th>Precio</th>
+                                <th>Dirección</th>
+                                <th>Programado</th>
+                                <th>Ventana</th>
+                                <th>Status</th>
+                                <th>Hora recogida (ET)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var r in _report)
+                            {
+                                <tr>
+                                    <td>@r.DriverName</td>
+                                    <td><code>@r.Vin</code></td>
+                                    <td>@(r.Year?.ToString() ?? "—") @(r.Make) @(r.Model)</td>
+                                    <td>@UsdMoney.FormatOrDash(r.PurchasePrice)</td>
+                                    <td>@(r.PickupAddress ?? "—")</td>
+                                    <td>@r.ScheduledPickupDate.ToString("yyyy-MM-dd")</td>
+                                    <td>@(string.IsNullOrWhiteSpace(r.ScheduledPickupWindow) ? "—" : r.ScheduledPickupWindow)</td>
+                                    <td>
+                                        @if (r.Status == ScheduledPickupStatus.Pending)
+                                        {
+                                            <span class="badge-status badge-status--danger">Pendiente</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge-status badge-status--ok">Adquirido</span>
+                                        }
+                                    </td>
+                                    <td>@(r.PickedUpAtEastern?.ToString("yyyy-MM-dd HH:mm") ?? "—")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="page-panel mb-3">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-5">
+                <label class="form-label">Búsqueda</label>
+                <input class="form-control" placeholder="VIN, marca, modelo, chofer, dirección…"
+                       @bind="_search" @bind:event="oninput" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Chofer</label>
+                <select class="form-select" @bind="_driverFilter">
+                    <option value="">Todos</option>
+                    @foreach (var d in _drivers)
+                    {
+                        <option value="@d.Id.ToString()">@d.DisplayName</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-4">
+                <p class="form-hint mb-0">@Filtered.Count() programados · promoción a Adquiridos a las 12:00 ET</p>
+            </div>
+        </div>
+    </div>
+
+    @if (!Filtered.Any())
+    {
+        <div class="page-panel empty-state">
+            <p class="empty-state__title">No hay vehículos programados</p>
+            <p class="mb-3">Agenda una recolección o ajusta los filtros.</p>
+            <a class="btn btn-primary" href="vehicles/pickups/new">Agendar recolección</a>
+        </div>
+    }
+    else
+    {
+        <div class="page-panel table-shell">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>VIN</th>
+                        <th>Año</th>
+                        <th>Marca / Modelo</th>
+                        <th>Precio</th>
+                        <th>Dirección</th>
+                        <th>Para recoger</th>
+                        <th>Ventana</th>
+                        <th>Chofer</th>
+                        <th>Status</th>
+                        <th>Hora recogida</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var s in Filtered)
+                    {
+                        <tr>
+                            <td><code>@s.Vin</code></td>
+                            <td>@(s.Year?.ToString() ?? "—")</td>
+                            <td><strong>@($"{s.Make} {s.Model}".Trim())</strong></td>
+                            <td>@UsdMoney.FormatOrDash(s.PurchasePrice)</td>
+                            <td>@(s.PickupAddress ?? "—")</td>
+                            <td>@s.ScheduledPickupDate.ToString("yyyy-MM-dd")</td>
+                            <td>@(string.IsNullOrWhiteSpace(s.ScheduledPickupWindow) ? "—" : s.ScheduledPickupWindow)</td>
+                            <td>@(s.AssignedDriver?.DisplayName ?? "Sin asignar")</td>
+                            <td>
+                                @if (s.Status == (byte)ScheduledPickupStatus.Pending)
+                                {
+                                    <span class="badge-status badge-status--danger">Pendiente</span>
+                                }
+                                else
+                                {
+                                    <span class="badge-status badge-status--ok">Adquirido</span>
+                                }
+                            </td>
+                            <td>
+                                @(s.PickedUpAtUtc is null
+                                    ? "—"
+                                    : YardTimeZone.ToEastern(s.PickedUpAtUtc.Value).ToString("HH:mm"))
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@code {
+    private List<ScheduledVehiclePickup>? _items;
+    private List<User> _drivers = [];
+    private List<DriverReportRow>? _report;
+    private string? _error;
+    private string _search = string.Empty;
+    private string _driverFilter = string.Empty;
+    private string _reportDriverId = "0";
+    private string _reportMode = "both";
+    private DateTime? _reportFrom;
+    private DateTime? _reportTo;
+
+    private IEnumerable<ScheduledVehiclePickup> Filtered
+    {
+        get
+        {
+            if (_items is null) return [];
+            IEnumerable<ScheduledVehiclePickup> q = _items;
+
+            if (int.TryParse(_driverFilter, out var driverId) && driverId > 0)
+                q = q.Where(s => s.AssignedDriverUserId == driverId);
+
+            var s = _search.Trim();
+            if (string.IsNullOrEmpty(s)) return q;
+
+            return q.Where(x =>
+                Contains(x.Vin, s)
+                || Contains(x.Make, s)
+                || Contains(x.Model, s)
+                || Contains(x.PickupAddress, s)
+                || Contains(x.AssignedDriver?.DisplayName, s)
+                || Contains(x.Year?.ToString(), s));
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CurrentUser.IsAuthenticated)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        if (!CurrentUser.CanManagePickupSchedule)
+            return;
+
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                _drivers = await Schedules.GetDriverUsersAsync();
+                _items = await Schedules.GetActiveScheduleAsync();
+            }, "Cargando agenda…");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message + " — ¿Ejecutaste 015_DriverPickupSchedule.sql?";
+        }
+    }
+
+    private async Task RunReportAsync()
+    {
+        _error = null;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                var includePending = _reportMode is "both" or "pending";
+                var includePicked = _reportMode is "both" or "picked";
+                int? driverId = int.TryParse(_reportDriverId, out var id) && id > 0 ? id : null;
+                DateOnly? from = _reportFrom is null ? null : DateOnly.FromDateTime(_reportFrom.Value);
+                DateOnly? to = _reportTo is null ? null : DateOnly.FromDateTime(_reportTo.Value);
+                _report = await Schedules.GetDriverReportAsync(driverId, includePending, includePicked, from, to);
+            }, "Generando reporte…");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+            _error = ex.Message;
+        }
+    }
+
+    private static bool Contains(string? haystack, string needle)
+        => !string.IsNullOrEmpty(haystack)
+           && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
+}

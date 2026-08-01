@@ -34,6 +34,10 @@ public partial class YardInventoryDbContext : DbContext
 
     public virtual DbSet<InvoiceTemplate> InvoiceTemplates { get; set; }
 
+    public virtual DbSet<ScheduledVehiclePickup> ScheduledVehiclePickups { get; set; }
+
+    public virtual DbSet<ScheduledVehiclePickupImage> ScheduledVehiclePickupImages { get; set; }
+
     public virtual DbSet<Zone> Zones { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -161,7 +165,11 @@ public partial class YardInventoryDbContext : DbContext
             entity.Property(e => e.Email).HasMaxLength(256);
             entity.Property(e => e.IsActive).HasDefaultValue(true);
             entity.Property(e => e.PasswordHash).HasMaxLength(500);
+            entity.Property(e => e.PreferredLanguage).HasMaxLength(5).HasDefaultValue("es");
             entity.Property(e => e.UserName).HasMaxLength(100);
+            entity.HasIndex(e => e.DriverAccessToken, "UQ_Users_DriverAccessToken")
+                .IsUnique()
+                .HasFilter("[DriverAccessToken] IS NOT NULL");
 
             entity.HasMany(d => d.Roles).WithMany(p => p.Users)
                 .UsingEntity<Dictionary<string, object>>(
@@ -256,6 +264,62 @@ public partial class YardInventoryDbContext : DbContext
             entity.Property(e => e.IsDefault).HasDefaultValue(false);
             entity.Property(e => e.IsActive).HasDefaultValue(true);
             entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+        });
+
+        modelBuilder.Entity<ScheduledVehiclePickup>(entity =>
+        {
+            entity.HasIndex(e => new { e.AssignedDriverUserId, e.Status, e.ScheduledPickupDate },
+                "IX_ScheduledVehiclePickups_Driver_Status_Date");
+
+            entity.Property(e => e.Vin).HasMaxLength(17);
+            entity.Property(e => e.Make).HasMaxLength(100);
+            entity.Property(e => e.Model).HasMaxLength(100);
+            entity.Property(e => e.Observations).HasMaxLength(2000);
+            entity.Property(e => e.PurchasePrice).HasPrecision(12, 2);
+            entity.Property(e => e.PickupAddress).HasMaxLength(500);
+            entity.Property(e => e.SellerName).HasMaxLength(150);
+            entity.Property(e => e.SellerPhone).HasMaxLength(40);
+            entity.Property(e => e.SellerEmail).HasMaxLength(256);
+            entity.Property(e => e.PaymentMethod).HasMaxLength(80);
+            entity.Property(e => e.ImageRelativePath).HasMaxLength(400);
+            entity.Property(e => e.ScheduledPickupWindow).HasMaxLength(80);
+            entity.Property(e => e.Status).HasDefaultValue((byte)0);
+            entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(d => d.AssignedDriver).WithMany(p => p.AssignedPickups)
+                .HasForeignKey(d => d.AssignedDriverUserId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_ScheduledVehiclePickups_AssignedDriver");
+
+            entity.HasOne(d => d.CreatedByUser).WithMany(p => p.CreatedPickups)
+                .HasForeignKey(d => d.CreatedByUserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_ScheduledVehiclePickups_CreatedBy");
+
+            entity.HasOne(d => d.PromotedVehicle).WithMany()
+                .HasForeignKey(d => d.PromotedVehicleId)
+                .HasConstraintName("FK_ScheduledVehiclePickups_PromotedVehicle");
+
+            entity.HasOne(d => d.VehicleSource).WithMany()
+                .HasForeignKey(d => d.VehicleSourceId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_ScheduledVehiclePickups_VehicleSources");
+        });
+
+        modelBuilder.Entity<ScheduledVehiclePickupImage>(entity =>
+        {
+            entity.HasIndex(e => new { e.ScheduledId, e.SortOrder, e.Id },
+                "IX_ScheduledVehiclePickupImages_ScheduledId_SortOrder");
+
+            entity.Property(e => e.RelativePath).HasMaxLength(400);
+            entity.Property(e => e.SortOrder).HasDefaultValue(0);
+            entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(d => d.Scheduled).WithMany(p => p.Images)
+                .HasForeignKey(d => d.ScheduledId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_ScheduledVehiclePickupImages_Schedule");
         });
 
         modelBuilder.Entity<Zone>(entity =>

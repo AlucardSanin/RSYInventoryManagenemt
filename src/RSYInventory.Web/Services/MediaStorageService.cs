@@ -21,7 +21,7 @@ public sealed class MediaStorageService(IWebHostEnvironment env)
         string? brandOrMake,
         CancellationToken cancellationToken = default)
     {
-        if (category is not ("parts" or "vehicles"))
+        if (category is not ("parts" or "vehicles" or "pickups"))
             throw new InvalidOperationException("Categoría de imagen inválida.");
 
         var ext = Path.GetExtension(originalFileName);

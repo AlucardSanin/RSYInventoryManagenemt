@@ -1,0 +1,478 @@
+@page "/d/{Token:guid}"
+@layout PublicLayout
+@inject PickupScheduleService Schedules
+@inject UiBusyService Busy
+@inject ToastService Toasts
+
+<PageTitle>@_t.Title</PageTitle>
+
+@if (_loading)
+{
+    <div class="page-panel"><p class="mb-0 text-muted">@_t.Loading</p></div>
+}
+else if (_driver is null)
+{
+    <div class="alert alert-danger">@_t.InvalidLink</div>
+}
+else
+{
+    <div class="page-panel mb-3">
+        <h1 class="h4 mb-1">@_t.Hello, @_driver.DisplayName</h1>
+        <p class="form-hint mb-0">@_t.Lead</p>
+    </div>
+
+    <div class="page-panel mb-3">
+        <div class="d-flex flex-wrap gap-2">
+            <button type="button"
+                    class="btn @(_tab == "today" ? "btn-primary" : "btn-outline-secondary")"
+                    @onclick='() => _tab = "today"'>@_t.TabToday</button>
+            <button type="button"
+                    class="btn @(_tab == "history" ? "btn-primary" : "btn-outline-secondary")"
+                    @onclick="ShowHistoryAsync">@_t.TabHistory</button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-danger">@_error</div>
+    }
+
+    @if (_tab == "today")
+    {
+        @if (_active.Count == 0)
+        {
+            <div class="page-panel empty-state">
+                <p class="empty-state__title">@_t.EmptyToday</p>
+            </div>
+        }
+        else
+        {
+            <div class="driver-card-list">
+                @foreach (var s in _active)
+                {
+                    <button type="button" class="driver-card" @onclick="() => OpenDetail(s)">
+                        <div class="driver-card__row">
+                            <strong>@(s.Year?.ToString() ?? "—") @(s.Make) @(s.Model)</strong>
+                            @StatusBadge(s)
+                        </div>
+                        <div class="driver-card__meta">
+                            <span>@_t.Price: @UsdMoney.FormatOrDash(s.PurchasePrice)</span>
+                            <span>@_t.Address: @(s.PickupAddress ?? "—")</span>
+                        </div>
+                        <div class="form-hint">
+                            @_t.Scheduled: @s.ScheduledPickupDate.ToString("yyyy-MM-dd")
+                            @if (!string.IsNullOrWhiteSpace(s.ScheduledPickupWindow))
+                            {
+                                <span> · @_t.AppointmentTime: @s.ScheduledPickupWindow</span>
+                            }
+                        </div>
+                    </button>
+                }
+            </div>
+        }
+    }
+    else
+    {
+        <div class="page-panel mb-3">
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="FilterHistoryTodayAsync">@_t.FilterToday</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="FilterHistoryYesterdayAsync">@_t.FilterYesterday</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="FilterHistoryWeekAsync">@_t.FilterWeek</button>
+            </div>
+            <div class="row g-2 align-items-end">
+                <div class="col-6">
+                    <label class="form-label">@_t.From</label>
+                    <InputDate class="form-control" @bind-Value="_histFrom" />
+                </div>
+                <div class="col-6">
+                    <label class="form-label">@_t.To</label>
+                    <InputDate class="form-control" @bind-Value="_histTo" />
+                </div>
+                <div class="col-12">
+                    <button type="button" class="btn btn-outline-primary w-100" @onclick="FilterHistoryCustomAsync">@_t.ApplyFilter</button>
+                </div>
+            </div>
+        </div>
+
+        @if (_history.Count == 0)
+        {
+            <div class="page-panel empty-state"><p class="empty-state__title">@_t.EmptyHistory</p></div>
+        }
+        else
+        {
+            <div class="driver-card-list">
+                @foreach (var s in _history)
+                {
+                    <button type="button" class="driver-card" @onclick="() => OpenDetail(s)">
+                        <div class="driver-card__row">
+                            <strong>@(s.Year?.ToString() ?? "—") @(s.Make) @(s.Model)</strong>
+                            @StatusBadge(s)
+                        </div>
+                        <div class="driver-card__meta">
+                            <span>@_t.Price: @UsdMoney.FormatOrDash(s.PurchasePrice)</span>
+                            <span>@_t.Address: @(s.PickupAddress ?? "—")</span>
+                        </div>
+                        <div class="form-hint">
+                            @_t.PickedAt:
+                            @(s.PickedUpAtUtc is null
+                                ? "—"
+                                : YardTimeZone.ToEastern(s.PickedUpAtUtc.Value).ToString("yyyy-MM-dd HH:mm"))
+                        </div>
+                    </button>
+                }
+            </div>
+        }
+    }
+}
+
+@if (_selected is not null)
+{
+    <div class="modal-backdrop show"></div>
+    <div class="modal d-block" tabindex="-1">
+        <div class="modal-dialog modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5">@(_selected.Year) @_selected.Make @_selected.Model</h2>
+                    <button type="button" class="btn-close" @onclick="CloseDetail"></button>
+                </div>
+                <div class="modal-body">
+                    <dl class="row mb-0">
+                        <dt class="col-5">VIN</dt><dd class="col-7"><code>@_selected.Vin</code></dd>
+                        <dt class="col-5">@_t.Price</dt><dd class="col-7">@UsdMoney.FormatOrDash(_selected.PurchasePrice)</dd>
+                        <dt class="col-5">@_t.Address</dt><dd class="col-7">@(_selected.PickupAddress ?? "—")</dd>
+                        <dt class="col-5">@_t.Scheduled</dt><dd class="col-7">@_selected.ScheduledPickupDate.ToString("yyyy-MM-dd")</dd>
+                        <dt class="col-5">@_t.AppointmentTime</dt>
+                        <dd class="col-7">@(string.IsNullOrWhiteSpace(_selected.ScheduledPickupWindow) ? "—" : _selected.ScheduledPickupWindow)</dd>
+                        <dt class="col-5">@_t.Source</dt><dd class="col-7">@_selected.VehicleSource.Name</dd>
+                        <dt class="col-5">@_t.Mileage</dt><dd class="col-7">@(_selected.Mileage?.ToString("N0") ?? "—")</dd>
+                        <dt class="col-5">@_t.Payment</dt><dd class="col-7">@(_selected.PaymentMethod ?? "—")</dd>
+                        <dt class="col-5">@_t.Seller</dt><dd class="col-7">@(_selected.SellerName ?? "—")</dd>
+                        <dt class="col-5">@_t.Phone</dt><dd class="col-7">@(_selected.SellerPhone ?? "—")</dd>
+                        <dt class="col-5">@_t.Notes</dt><dd class="col-7">@(_selected.Observations ?? "—")</dd>
+                        @if (_selected.PickedUpAtUtc is not null)
+                        {
+                            <dt class="col-5">@_t.PickedAt</dt>
+                            <dd class="col-7">@YardTimeZone.ToEastern(_selected.PickedUpAtUtc.Value).ToString("yyyy-MM-dd HH:mm")</dd>
+                        }
+                    </dl>
+                </div>
+                <div class="modal-footer">
+                    @{
+                        var canEdit = PickupScheduleService.CanDriverEditToday(_selected)
+                                      && _selected.Status != (byte)ScheduledPickupStatus.Promoted;
+                    }
+                    @if (_selected.Status == (byte)ScheduledPickupStatus.Pending)
+                    {
+                        <button type="button" class="btn btn-success" disabled="@(!canEdit || _busy)"
+                                @onclick="ConfirmPickUpAsync">@_t.MarkPicked</button>
+                    }
+                    else if (_selected.Status == (byte)ScheduledPickupStatus.PickedUp)
+                    {
+                        <button type="button" class="btn btn-outline-danger" disabled="@(!canEdit || _busy)"
+                                @onclick="ConfirmRevertAsync">@_t.MarkNotPicked</button>
+                    }
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CloseDetail">@_t.Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_confirmPick || _confirmRevert)
+{
+    <div class="modal-backdrop show" style="z-index:1060"></div>
+    <div class="modal d-block" tabindex="-1" style="z-index:1070">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5">@_t.ConfirmTitle</h2>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-0">@(_confirmPick ? _t.ConfirmPick : _t.ConfirmRevert)</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CancelConfirm">@_t.Cancel</button>
+                    <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="ExecuteConfirmAsync">@_t.Yes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid Token { get; set; }
+
+    private bool _loading = true;
+    private bool _busy;
+    private string _tab = "today";
+    private string? _error;
+    private User? _driver;
+    private List<ScheduledVehiclePickup> _active = [];
+    private List<ScheduledVehiclePickup> _history = [];
+    private ScheduledVehiclePickup? _selected;
+    private bool _confirmPick;
+    private bool _confirmRevert;
+    private DateTime? _histFrom;
+    private DateTime? _histTo;
+    private DriverUiText _t = DriverUiText.Spanish;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                var portal = await Schedules.GetDriverPortalAsync(Token);
+                if (portal is null)
+                {
+                    _driver = null;
+                    return;
+                }
+
+                _driver = portal.Driver;
+                _t = DriverUiText.For(_driver.PreferredLanguage);
+                _active = portal.ActivePickups;
+            }, "…");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task ShowHistoryAsync()
+    {
+        _tab = "history";
+        await FilterHistoryTodayAsync();
+    }
+
+    private Task FilterHistoryTodayAsync() => FilterHistoryAsync("today");
+    private Task FilterHistoryYesterdayAsync() => FilterHistoryAsync("yesterday");
+    private Task FilterHistoryWeekAsync() => FilterHistoryAsync("week");
+    private Task FilterHistoryCustomAsync() => FilterHistoryAsync(null);
+
+    private async Task FilterHistoryAsync(string? preset)
+    {
+        var today = YardTimeZone.TodayEastern();
+        if (preset == "today")
+        {
+            _histFrom = today.ToDateTime(TimeOnly.MinValue);
+            _histTo = today.ToDateTime(TimeOnly.MinValue);
+        }
+        else if (preset == "yesterday")
+        {
+            var y = today.AddDays(-1);
+            _histFrom = y.ToDateTime(TimeOnly.MinValue);
+            _histTo = y.ToDateTime(TimeOnly.MinValue);
+        }
+        else if (preset == "week")
+        {
+            _histFrom = today.AddDays(-7).ToDateTime(TimeOnly.MinValue);
+            _histTo = today.ToDateTime(TimeOnly.MinValue);
+        }
+
+        _error = null;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                DateOnly? from = _histFrom is null ? null : DateOnly.FromDateTime(_histFrom.Value);
+                DateOnly? to = _histTo is null ? null : DateOnly.FromDateTime(_histTo.Value);
+                _history = await Schedules.GetDriverHistoryAsync(Token, from, to);
+            }, "…");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private void OpenDetail(ScheduledVehiclePickup s) => _selected = s;
+    private void CloseDetail()
+    {
+        _selected = null;
+        _confirmPick = false;
+        _confirmRevert = false;
+    }
+
+    private void ConfirmPickUpAsync() => _confirmPick = true;
+    private void ConfirmRevertAsync() => _confirmRevert = true;
+    private void CancelConfirm()
+    {
+        _confirmPick = false;
+        _confirmRevert = false;
+    }
+
+    private async Task ExecuteConfirmAsync()
+    {
+        if (_selected is null || _busy) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            if (_confirmPick)
+                await Schedules.MarkPickedUpAsync(Token, _selected.Id);
+            else if (_confirmRevert)
+                await Schedules.MarkNotPickedUpAsync(Token, _selected.Id);
+
+            var portal = await Schedules.GetDriverPortalAsync(Token);
+            _active = portal?.ActivePickups ?? [];
+            if (_tab == "history")
+                await FilterHistoryCustomAsync();
+
+            _selected = _active.FirstOrDefault(x => x.Id == _selected.Id)
+                        ?? _history.FirstOrDefault(x => x.Id == _selected.Id);
+            _confirmPick = false;
+            _confirmRevert = false;
+            Toasts.Success(_t.Saved);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Toasts.Error(ex.Message);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private RenderFragment StatusBadge(ScheduledVehiclePickup s) => __builder =>
+    {
+        var pending = s.Status == (byte)ScheduledPickupStatus.Pending;
+        __builder.OpenElement(0, "span");
+        __builder.AddAttribute(1, "class", pending ? "badge-status badge-status--danger" : "badge-status badge-status--ok");
+        __builder.AddContent(2, pending ? _t.Pending : _t.Acquired);
+        __builder.CloseElement();
+    };
+
+    private sealed class DriverUiText
+    {
+        public string Title { get; init; } = "";
+        public string Loading { get; init; } = "";
+        public string InvalidLink { get; init; } = "";
+        public string Hello { get; init; } = "";
+        public string Lead { get; init; } = "";
+        public string TabToday { get; init; } = "";
+        public string TabHistory { get; init; } = "";
+        public string EmptyToday { get; init; } = "";
+        public string EmptyHistory { get; init; } = "";
+        public string Price { get; init; } = "";
+        public string Address { get; init; } = "";
+        public string Scheduled { get; init; } = "";
+        public string AppointmentTime { get; init; } = "";
+        public string Source { get; init; } = "";
+        public string Mileage { get; init; } = "";
+        public string Payment { get; init; } = "";
+        public string Seller { get; init; } = "";
+        public string Phone { get; init; } = "";
+        public string Notes { get; init; } = "";
+        public string PickedAt { get; init; } = "";
+        public string MarkPicked { get; init; } = "";
+        public string MarkNotPicked { get; init; } = "";
+        public string Close { get; init; } = "";
+        public string ConfirmTitle { get; init; } = "";
+        public string ConfirmPick { get; init; } = "";
+        public string ConfirmRevert { get; init; } = "";
+        public string Cancel { get; init; } = "";
+        public string Yes { get; init; } = "";
+        public string Saved { get; init; } = "";
+        public string FilterToday { get; init; } = "";
+        public string FilterYesterday { get; init; } = "";
+        public string FilterWeek { get; init; } = "";
+        public string From { get; init; } = "";
+        public string To { get; init; } = "";
+        public string ApplyFilter { get; init; } = "";
+        public string Pending { get; init; } = "";
+        public string Acquired { get; init; } = "";
+
+        public static DriverUiText For(string? lang) =>
+            string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase) ? English : Spanish;
+
+        public static DriverUiText Spanish { get; } = new()
+        {
+            Title = "Mis recogidas",
+            Loading = "Cargando…",
+            InvalidLink = "Enlace inválido o chofer inactivo.",
+            Hello = "Hola",
+            Lead = "Toca un vehículo para ver el detalle y marcarlo como recogido.",
+            TabToday = "Por recoger",
+            TabHistory = "Historial",
+            EmptyToday = "No tienes vehículos pendientes.",
+            EmptyHistory = "Sin recogidas en ese rango.",
+            Price = "Precio",
+            Address = "Dirección",
+            Scheduled = "Para recoger",
+            AppointmentTime = "Ventana con el vendedor",
+            Source = "Fuente",
+            Mileage = "Millas",
+            Payment = "Pago",
+            Seller = "Vendedor",
+            Phone = "Teléfono",
+            Notes = "Notas",
+            PickedAt = "Recogido a las",
+            MarkPicked = "Recogido",
+            MarkNotPicked = "No recogido",
+            Close = "Cerrar",
+            ConfirmTitle = "Confirmar",
+            ConfirmPick = "¿Seguro que quieres marcar como recogido?",
+            ConfirmRevert = "¿Seguro que quieres marcarlo como no recogido?",
+            Cancel = "Cancelar",
+            Yes = "Sí",
+            Saved = "Actualizado.",
+            FilterToday = "Hoy",
+            FilterYesterday = "Ayer",
+            FilterWeek = "La semana pasada",
+            From = "Desde",
+            To = "Hasta",
+            ApplyFilter = "Filtrar",
+            Pending = "Pendiente",
+            Acquired = "Adquirido"
+        };
+
+        public static DriverUiText English { get; } = new()
+        {
+            Title = "My pickups",
+            Loading = "Loading…",
+            InvalidLink = "Invalid link or inactive driver.",
+            Hello = "Hi",
+            Lead = "Tap a vehicle for details and to mark it picked up.",
+            TabToday = "To pick up",
+            TabHistory = "History",
+            EmptyToday = "No pending vehicles.",
+            EmptyHistory = "No pickups in that range.",
+            Price = "Price",
+            Address = "Address",
+            Scheduled = "Scheduled for",
+            AppointmentTime = "Time window with seller",
+            Source = "Source",
+            Mileage = "Miles",
+            Payment = "Payment",
+            Seller = "Seller",
+            Phone = "Phone",
+            Notes = "Notes",
+            PickedAt = "Picked up at",
+            MarkPicked = "Picked up",
+            MarkNotPicked = "Not picked up",
+            Close = "Close",
+            ConfirmTitle = "Confirm",
+            ConfirmPick = "Are you sure you want to mark this as picked up?",
+            ConfirmRevert = "Are you sure you want to mark this as not picked up?",
+            Cancel = "Cancel",
+            Yes = "Yes",
+            Saved = "Updated.",
+            FilterToday = "Today",
+            FilterYesterday = "Yesterday",
+            FilterWeek = "Last week",
+            From = "From",
+            To = "To",
+            ApplyFilter = "Filter",
+            Pending = "Pending",
+            Acquired = "Acquired"
+        };
+    }
+}

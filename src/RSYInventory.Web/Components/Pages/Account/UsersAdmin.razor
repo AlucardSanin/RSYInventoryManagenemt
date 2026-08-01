@@ -3,6 +3,8 @@
 @inject ICurrentUserService CurrentUser
 @inject UiBusyService Busy
 @inject NavigationManager Nav
+@inject IJSRuntime Js
+@inject ToastService Toasts
 
 <PageTitle>Usuarios</PageTitle>
 
@@ -48,8 +50,16 @@ else
                 <input class="form-control" @bind="_email" />
             </div>
             <div class="col-md-4">
-                <label class="form-label">@(_editingId is null ? "Contraseña *" : "Nueva contraseña (opcional)")</label>
-                <input type="password" class="form-control" @bind="_password" autocomplete="new-password" placeholder="@(_editingId is null ? "" : "Dejar vacío para no cambiar")" />
+                <label class="form-label">@(_editingId is null ? (DriverOnlySelected ? "Contraseña (opcional)" : "Contraseña *") : "Nueva contraseña (opcional)")</label>
+                <input type="password" class="form-control" @bind="_password" autocomplete="new-password"
+                       placeholder="@(DriverOnlySelected && _editingId is null ? "Los choferes usan su enlace sin clave" : (_editingId is null ? "" : "Dejar vacío para no cambiar"))" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Idioma de la agenda del chofer</label>
+                <select class="form-select" @bind="_preferredLanguage">
+                    <option value="es">Español</option>
+                    <option value="en">English</option>
+                </select>
             </div>
             @if (_editingId is not null)
             {
@@ -105,6 +115,8 @@ else
                         <th>Usuario</th>
                         <th>Nombre</th>
                         <th>Accesos</th>
+                        <th>Idioma</th>
+                        <th>Enlace chofer</th>
                         <th>Estado</th>
                         <th class="text-end">Acciones</th>
                     </tr>
@@ -128,6 +140,22 @@ else
                                         <span class="badge-status badge-status--parts">@RoleTitle(role)</span>
                                     }
                                 </div>
+                            </td>
+                            <td>@(u.PreferredLanguage == "en" ? "English" : "Español")</td>
+                            <td>
+                                @if (u.DriverAccessToken is Guid token)
+                                {
+                                    var link = Nav.ToAbsoluteUri($"d/{token}").ToString();
+                                    <div class="form-hint mono" style="max-width:14rem;word-break:break-all">@link</div>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary mt-1"
+                                            @onclick="() => CopyLinkAsync(link)">Copiar</button>
+                                    <button type="button" class="btn btn-sm btn-outline-primary mt-1"
+                                            @onclick="() => RotateTokenAsync(u.Id)">Nuevo enlace</button>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">—</span>
+                                }
                             </td>
                             <td>
                                 @if (u.IsActive)
@@ -165,7 +193,11 @@ else
     private string _displayName = string.Empty;
     private string _email = string.Empty;
     private string _password = string.Empty;
+    private string _preferredLanguage = "es";
     private bool _isActive = true;
+
+    private bool DriverOnlySelected =>
+        _selectedRoles.Count == 1 && _selectedRoles.Contains(AppRole.Driver);
 
     protected override async Task OnInitializedAsync()
     {
@@ -210,6 +242,7 @@ else
         _displayName = user.DisplayName;
         _email = user.Email ?? string.Empty;
         _password = string.Empty;
+        _preferredLanguage = user.PreferredLanguage is "en" ? "en" : "es";
         _isActive = user.IsActive;
         _selectedRoles.Clear();
         foreach (var r in user.Roles)
@@ -226,6 +259,7 @@ else
         _displayName = string.Empty;
         _email = string.Empty;
         _password = string.Empty;
+        _preferredLanguage = "es";
         _isActive = true;
         _selectedRoles.Clear();
     }
@@ -242,7 +276,13 @@ else
             {
                 if (_editingId is null)
                 {
-                    await Users.CreateUserAsync(_userName, _displayName, _email, _password, _selectedRoles.ToList());
+                    await Users.CreateUserAsync(
+                        _userName,
+                        _displayName,
+                        _email,
+                        _password,
+                        _preferredLanguage,
+                        _selectedRoles.ToList());
                     _ok = "Usuario creado.";
                     CancelEdit();
                 }
@@ -253,6 +293,7 @@ else
                         _displayName,
                         _email,
                         _isActive,
+                        _preferredLanguage,
                         _selectedRoles.ToList(),
                         string.IsNullOrWhiteSpace(_password) ? null : _password);
                     _ok = "Usuario actualizado.";
@@ -272,6 +313,37 @@ else
         }
     }
 
+    private async Task RotateTokenAsync(int userId)
+    {
+        try
+        {
+            await Users.RotateDriverAccessTokenAsync(userId);
+            _users = await Users.GetUsersAsync();
+            _ok = "Nuevo enlace de chofer generado.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task CopyLinkAsync(string link)
+    {
+        if (string.IsNullOrWhiteSpace(link)) return;
+        _error = null;
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", link);
+            _ok = "Enlace copiado al portapapeles.";
+            Toasts.Success("Enlace copiado.");
+        }
+        catch
+        {
+            _ok = $"Copia manualmente: {link}";
+            Toasts.Error("No se pudo copiar. Selecciona el enlace y cópialo manualmente.");
+        }
+    }
+
     private static string RoleTitle(AppRole role) => role switch
     {
         AppRole.InventoryViewer => "Solo ver inventario y vehículos",
@@ -279,6 +351,7 @@ else
         AppRole.ZoneManager => "Gestionar zonas",
         AppRole.VehicleAcquirer => "Adquirir vehículos",
         AppRole.SystemAdmin => "God / System Admin",
+        AppRole.Driver => "Chofer / Driver",
         _ => role.ToString()
     };
 
@@ -289,6 +362,7 @@ else
         AppRole.ZoneManager => "Crear y ajustar zonas, filas y paletas (incluye editar inventario).",
         AppRole.VehicleAcquirer => "Registrar/editar vehículos, fotos y recibos de compra; no asigna paleta.",
         AppRole.SystemAdmin => "Crear usuarios y asignar niveles de acceso.",
+        AppRole.Driver => "Solo ve su agenda de recolección con un enlace directo (sin contraseña).",
         _ => string.Empty
     };
 }

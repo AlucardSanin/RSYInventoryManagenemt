@@ -56,6 +56,16 @@ else
                 </select>
             </div>
             <div class="col-md-3">
+                <label class="form-label">Recogido por</label>
+                <select class="form-select" @bind="_driverFilter">
+                    <option value="">Todos</option>
+                    @foreach (var d in DriverOptions)
+                    {
+                        <option value="@d">@d</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-12">
                 <p class="form-hint mb-0">@Filtered.Count() de @_items.Count vehículos</p>
             </div>
         </div>
@@ -82,6 +92,7 @@ else
                         <th>Millas</th>
                         <th>Precio</th>
                         <th>Fuente</th>
+                        <th>Recogido por</th>
                         <th>Adquirido</th>
                         <th>Ubicación</th>
                         <th class="text-end">Acciones</th>
@@ -117,6 +128,7 @@ else
                             <td>@(v.Mileage?.ToString("N0") ?? "—")</td>
                             <td>@UsdMoney.FormatOrDash(v.PurchasePrice)</td>
                             <td>@v.VehicleSource.Name</td>
+                            <td>@(string.IsNullOrWhiteSpace(v.PickupDriver) ? "—" : v.PickupDriver)</td>
                             <td>@v.AcquiredAt.ToString("yyyy-MM-dd")</td>
                             <td>
                                 @if (v.Pallet is null)
@@ -152,7 +164,18 @@ else
     private string? _error;
     private string _search = string.Empty;
     private string _locationFilter = string.Empty;
+    private string _driverFilter = string.Empty;
     private ImageViewer? _viewer;
+
+    private IEnumerable<string> DriverOptions =>
+        _items is null
+            ? Enumerable.Empty<string>()
+            : _items
+                .Select(v => v.PickupDriver)
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Select(n => n!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase);
 
     private IEnumerable<Vehicle> Filtered
     {
@@ -166,6 +189,9 @@ else
             else if (_locationFilter == "unlocated")
                 q = q.Where(v => v.PalletId is null);
 
+            if (!string.IsNullOrWhiteSpace(_driverFilter))
+                q = q.Where(v => string.Equals(v.PickupDriver, _driverFilter, StringComparison.OrdinalIgnoreCase));
+
             var s = _search.Trim();
             if (string.IsNullOrEmpty(s)) return q;
 
@@ -175,6 +201,7 @@ else
                 || Contains(v.Model, s)
                 || Contains(v.Year?.ToString(), s)
                 || Contains(v.VehicleSource?.Name, s)
+                || Contains(v.PickupDriver, s)
                 || Contains(v.Pallet is null ? "Sin ubicar" : YardLayoutService.FormatPalletLabel(v.Pallet), s)
                 || MatchesInvoiceNumber(v.InvoiceNumber, s));
         }

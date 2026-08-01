@@ -51,6 +51,16 @@ else
             </a>
         }
 
+        @if (CurrentUser.CanManagePickupSchedule)
+        {
+            <a class="task-card" href="vehicles/pickups">
+                <p class="task-card__kicker">Trabajo diario</p>
+                <h2 class="task-card__title">Agenda de recolección</h2>
+                <p class="task-card__text">Programa recogidas, asigna choferes y genera reportes.</p>
+                <p class="task-card__cta">Abrir agenda →</p>
+            </a>
+        }
+
         @if (CurrentUser.CanAcquireVehicles)
         {
             <a class="task-card" href="vehicles/acquire">
