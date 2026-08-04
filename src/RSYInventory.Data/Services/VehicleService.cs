@@ -56,6 +56,19 @@ public class VehicleService
             .ToListAsync(ct);
     }
 
+    public async Task<List<string>> GetDistinctPickupDriversAsync(CancellationToken ct = default)
+    {
+        EnsureCanViewVehicles();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.Vehicles
+            .AsNoTracking()
+            .Where(v => v.PickupDriver != null && v.PickupDriver != "")
+            .Select(v => v.PickupDriver!)
+            .Distinct()
+            .OrderBy(x => x)
+            .ToListAsync(ct);
+    }
+
     public async Task<List<Vehicle>> GetAllAsync(CancellationToken ct = default)
     {
         EnsureCanViewVehicles();
@@ -69,6 +82,69 @@ public class VehicleService
             .Include(v => v.Pallet)!.ThenInclude(p => p!.Row)!.ThenInclude(r => r!.Zone)
             .OrderByDescending(v => v.AcquiredAt)
             .ToListAsync(ct);
+    }
+
+    /// <summary>Paged vehicle list for the acquired-vehicles screen.</summary>
+    public async Task<(List<Vehicle> Items, int TotalCount)> GetPageAsync(
+        string? search,
+        string? locationFilter,
+        string? pickupDriver,
+        int page,
+        int pageSize,
+        CancellationToken ct = default)
+    {
+        EnsureCanViewVehicles();
+
+        if (page < 1) page = 1;
+        if (pageSize < 1) pageSize = 25;
+        if (pageSize > 100) pageSize = 100;
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var q = db.Vehicles.AsNoTracking().AsQueryable();
+
+        if (locationFilter == "located")
+            q = q.Where(v => v.PalletId != null);
+        else if (locationFilter == "unlocated")
+            q = q.Where(v => v.PalletId == null);
+
+        if (!string.IsNullOrWhiteSpace(pickupDriver))
+        {
+            var driver = pickupDriver.Trim();
+            q = q.Where(v => v.PickupDriver != null && v.PickupDriver == driver);
+        }
+
+        var s = search?.Trim();
+        if (!string.IsNullOrEmpty(s))
+        {
+            var like = $"%{s}%";
+            var digits = new string(s.Where(char.IsDigit).ToArray());
+            q = q.Where(v =>
+                EF.Functions.Like(v.Vin, like)
+                || (v.Make != null && EF.Functions.Like(v.Make, like))
+                || (v.Model != null && EF.Functions.Like(v.Model, like))
+                || (v.Year != null && EF.Functions.Like(v.Year.ToString()!, like))
+                || (v.PickupDriver != null && EF.Functions.Like(v.PickupDriver, like))
+                || EF.Functions.Like(v.VehicleSource.Name, like)
+                || (v.InvoiceNumber != null && (
+                    EF.Functions.Like(v.InvoiceNumber.ToString()!, like)
+                    || (digits.Length > 0 && EF.Functions.Like(v.InvoiceNumber.ToString()!, $"%{digits}%"))
+                )));
+        }
+
+        var total = await q.CountAsync(ct);
+
+        var items = await q
+            .Include(v => v.VehicleSource)
+            .Include(v => v.Images)
+            .Include(v => v.Pallet)!.ThenInclude(p => p!.Row)!.ThenInclude(r => r!.Zone)
+            .OrderByDescending(v => v.AcquiredAt)
+            .ThenByDescending(v => v.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .AsSplitQuery()
+            .ToListAsync(ct);
+
+        return (items, total);
     }
 
     public async Task<Vehicle?> GetByIdAsync(int id, CancellationToken ct = default)
