@@ -158,15 +158,15 @@ else
                 </div>
                 <div class="modal-footer">
                     @{
-                        var canEdit = PickupScheduleService.CanDriverEditToday(_selected)
-                                      && _selected.Status != (byte)ScheduledPickupStatus.Promoted;
+                        var canEdit = PickupScheduleService.CanDriverEditToday(_selected);
+                        var isPicked = PickupScheduleService.IsPickedUpStatus(_selected.Status);
                     }
                     @if (_selected.Status == (byte)ScheduledPickupStatus.Pending)
                     {
                         <button type="button" class="btn btn-success" disabled="@(!canEdit || _busy)"
                                 @onclick="ConfirmPickUpAsync">@_t.MarkPicked</button>
                     }
-                    else if (_selected.Status == (byte)ScheduledPickupStatus.PickedUp)
+                    else if (isPicked)
                     {
                         <button type="button" class="btn btn-outline-danger" disabled="@(!canEdit || _busy)"
                                 @onclick="ConfirmRevertAsync">@_t.MarkNotPicked</button>
@@ -314,10 +314,19 @@ else
         _error = null;
         try
         {
-            if (_confirmPick)
-                await Schedules.MarkPickedUpAsync(Token, _selected.Id);
-            else if (_confirmRevert)
-                await Schedules.MarkNotPickedUpAsync(Token, _selected.Id);
+            try
+            {
+                if (_confirmPick)
+                    await Schedules.MarkPickedUpAsync(Token, _selected.Id);
+                else if (_confirmRevert)
+                    await Schedules.MarkNotPickedUpAsync(Token, _selected.Id);
+            }
+            catch (Exception ex)
+            {
+                _error = LocalizeDriverError(ex.Message);
+                Toasts.Error(_error);
+                return;
+            }
 
             var portal = await Schedules.GetDriverPortalAsync(Token);
             _active = portal?.ActivePickups ?? [];
@@ -332,8 +341,8 @@ else
         }
         catch (Exception ex)
         {
-            _error = ex.Message;
-            Toasts.Error(ex.Message);
+            _error = LocalizeDriverError(ex.Message);
+            Toasts.Error(_error);
         }
         finally
         {
@@ -341,12 +350,37 @@ else
         }
     }
 
+    private string LocalizeDriverError(string message)
+    {
+        var en = string.Equals(_driver?.PreferredLanguage, "en", StringComparison.OrdinalIgnoreCase);
+        if (message.Contains("collection day has ended", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("no longer be changed", StringComparison.OrdinalIgnoreCase))
+            return en
+                ? "This pickup can no longer be changed after the collection day has ended."
+                : "Ya no se puede cambiar esta recolección después del día de recogida.";
+        if (message.Contains("Already marked", StringComparison.OrdinalIgnoreCase))
+            return en ? "Already marked as picked up." : "Ya está marcado como recogido.";
+        if (message.Contains("ubicación", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("yard", StringComparison.OrdinalIgnoreCase))
+            return en
+                ? "Cannot revert: the vehicle already has a yard location."
+                : "No se puede revertir: el vehículo ya tiene ubicación en la yarda.";
+        if (message.Contains("recibo", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("invoice", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("firma", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("signature", StringComparison.OrdinalIgnoreCase))
+            return en
+                ? "Cannot revert: the vehicle already has a receipt or signature."
+                : "No se puede revertir: el vehículo ya tiene recibo o firma.";
+        return message;
+    }
+
     private RenderFragment StatusBadge(ScheduledVehiclePickup s) => __builder =>
     {
         var pending = s.Status == (byte)ScheduledPickupStatus.Pending;
         __builder.OpenElement(0, "span");
         __builder.AddAttribute(1, "class", pending ? "badge-status badge-status--danger" : "badge-status badge-status--ok");
-        __builder.AddContent(2, pending ? _t.Pending : _t.Acquired);
+        __builder.AddContent(2, pending ? _t.Pending : _t.PickedUp);
         __builder.CloseElement();
     };
 
@@ -388,6 +422,7 @@ else
         public string To { get; init; } = "";
         public string ApplyFilter { get; init; } = "";
         public string Pending { get; init; } = "";
+        public string PickedUp { get; init; } = "";
         public string Acquired { get; init; } = "";
 
         public static DriverUiText For(string? lang) =>
@@ -419,8 +454,8 @@ else
             MarkNotPicked = "No recogido",
             Close = "Cerrar",
             ConfirmTitle = "Confirmar",
-            ConfirmPick = "¿Seguro que quieres marcar como recogido?",
-            ConfirmRevert = "¿Seguro que quieres marcarlo como no recogido?",
+            ConfirmPick = "¿Seguro que quieres marcar como recogido? El vehículo pasará a la lista de adquiridos.",
+            ConfirmRevert = "¿Seguro que quieres marcarlo como no recogido? Se quitará de adquiridos y volverá a pendientes.",
             Cancel = "Cancelar",
             Yes = "Sí",
             Saved = "Actualizado.",
@@ -431,6 +466,7 @@ else
             To = "Hasta",
             ApplyFilter = "Filtrar",
             Pending = "Pendiente",
+            PickedUp = "Recogido",
             Acquired = "Adquirido"
         };
 
@@ -460,8 +496,8 @@ else
             MarkNotPicked = "Not picked up",
             Close = "Close",
             ConfirmTitle = "Confirm",
-            ConfirmPick = "Are you sure you want to mark this as picked up?",
-            ConfirmRevert = "Are you sure you want to mark this as not picked up?",
+            ConfirmPick = "Are you sure you want to mark this as picked up? It will move to the acquired vehicles list.",
+            ConfirmRevert = "Are you sure you want to mark this as not picked up? It will be removed from acquired and return to pending.",
             Cancel = "Cancel",
             Yes = "Yes",
             Saved = "Updated.",
@@ -472,6 +508,7 @@ else
             To = "To",
             ApplyFilter = "Filter",
             Pending = "Pending",
+            PickedUp = "Picked up",
             Acquired = "Acquired"
         };
     }

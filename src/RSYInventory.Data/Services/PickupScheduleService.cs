@@ -37,13 +37,39 @@ public sealed class PickupScheduleService
     {
         EnsureCanManageSchedule();
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
+
+        // Recogido rows stay visible only until midnight Eastern (NC); then they leave the agenda list.
+        var today = YardTimeZone.TodayEastern();
+        var dayStartUtc = TimeZoneInfo.ConvertTimeToUtc(
+            today.ToDateTime(TimeOnly.MinValue),
+            YardTimeZone.EasternInfo);
+        var nextDayStartUtc = TimeZoneInfo.ConvertTimeToUtc(
+            today.AddDays(1).ToDateTime(TimeOnly.MinValue),
+            YardTimeZone.EasternInfo);
+
         return await db.ScheduledVehiclePickups
             .AsNoTracking()
             .Include(s => s.VehicleSource)
             .Include(s => s.AssignedDriver)
             .Include(s => s.Images)
-            .Where(s => s.Status != (byte)ScheduledPickupStatus.Promoted)
-            .OrderBy(s => s.ScheduledPickupDate)
+            .Where(s =>
+                s.Status == (byte)ScheduledPickupStatus.Pending
+                || ((s.Status == (byte)ScheduledPickupStatus.PickedUp
+                     || s.Status == (byte)ScheduledPickupStatus.Promoted)
+                    && (
+                        (s.PickedUpAtUtc != null
+                         && s.PickedUpAtUtc >= dayStartUtc
+                         && s.PickedUpAtUtc < nextDayStartUtc)
+                        || (s.PickedUpAtUtc == null
+                            && s.PromotedAtUtc != null
+                            && s.PromotedAtUtc >= dayStartUtc
+                            && s.PromotedAtUtc < nextDayStartUtc)
+                        || (s.PickedUpAtUtc == null
+                            && s.PromotedAtUtc == null
+                            && s.ScheduledPickupDate == today)
+                    )))
+            .OrderBy(s => s.Status == (byte)ScheduledPickupStatus.Pending ? 0 : 1)
+            .ThenBy(s => s.ScheduledPickupDate)
             .ThenBy(s => s.Id)
             .ToListAsync(ct);
     }
@@ -316,16 +342,16 @@ public sealed class PickupScheduleService
         if (driver is null || !driver.Roles.Any(r => r.Code == (int)AppRole.Driver))
             return null;
 
-        // Drivers only see today's agenda (NC local date) — not future scheduled days.
+        // Drivers only see today's agenda (NC local) — pending and already picked (for revert).
         var today = YardTimeZone.TodayEastern();
         var active = await db.ScheduledVehiclePickups
             .AsNoTracking()
             .Include(s => s.VehicleSource)
             .Include(s => s.Images)
             .Where(s => s.AssignedDriverUserId == driver.Id
-                        && s.Status != (byte)ScheduledPickupStatus.Promoted
                         && s.ScheduledPickupDate == today)
-            .OrderBy(s => s.ScheduledPickupWindow)
+            .OrderBy(s => s.Status == (byte)ScheduledPickupStatus.Pending ? 0 : 1)
+            .ThenBy(s => s.ScheduledPickupWindow)
             .ThenBy(s => s.Id)
             .ToListAsync(ct);
 
@@ -364,18 +390,19 @@ public sealed class PickupScheduleService
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var driver = await ResolveDriverByTokenAsync(db, token, ct);
         var entity = await db.ScheduledVehiclePickups
+            .Include(s => s.AssignedDriver)
+            .Include(s => s.Images)
             .FirstOrDefaultAsync(s => s.Id == scheduledId && s.AssignedDriverUserId == driver.Id, ct)
             ?? throw new InvalidOperationException("Pickup not found.");
 
         EnsureSameDayEditable(entity);
 
-        if (entity.Status == (byte)ScheduledPickupStatus.Promoted)
-            throw new InvalidOperationException("Already moved to acquired vehicles.");
+        if (entity.Status != (byte)ScheduledPickupStatus.Pending)
+            throw new InvalidOperationException("Already marked as picked up.");
 
-        entity.Status = (byte)ScheduledPickupStatus.PickedUp;
         entity.PickedUpAtUtc = DateTime.UtcNow;
         entity.UpdatedAtUtc = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
+        await PromoteToAcquiredInternalAsync(db, entity, actingUserId: driver.Id, ct);
 
         await _audit.WriteForUserAsync(
             driver.Id,
@@ -383,7 +410,7 @@ public sealed class PickupScheduleService
             "ScheduledVehiclePickup",
             entity.Id,
             $"Chofer marcó recogido: {entity.Vin}",
-            $"Driver {driver.DisplayName}",
+            $"Driver {driver.DisplayName}; VehicleId={entity.PromotedVehicleId}",
             ct);
     }
 
@@ -395,15 +422,8 @@ public sealed class PickupScheduleService
             .FirstOrDefaultAsync(s => s.Id == scheduledId && s.AssignedDriverUserId == driver.Id, ct)
             ?? throw new InvalidOperationException("Pickup not found.");
 
-        if (entity.Status != (byte)ScheduledPickupStatus.PickedUp)
-            throw new InvalidOperationException("Only picked-up items can be reverted.");
-
         EnsureSameDayEditable(entity);
-
-        entity.Status = (byte)ScheduledPickupStatus.Pending;
-        entity.PickedUpAtUtc = null;
-        entity.UpdatedAtUtc = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
+        await RevertToPendingInternalAsync(db, entity, ct);
 
         await _audit.WriteForUserAsync(
             driver.Id,
@@ -412,6 +432,53 @@ public sealed class PickupScheduleService
             entity.Id,
             $"Chofer revirtió recogido: {entity.Vin}",
             $"Driver {driver.DisplayName}",
+            ct);
+    }
+
+    /// <summary>Staff: mark a pending schedule as picked up and add it to acquired vehicles now.</summary>
+    public async Task StaffMarkPickedUpAsync(int scheduledId, CancellationToken ct = default)
+    {
+        EnsureCanManageSchedule();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var entity = await db.ScheduledVehiclePickups
+            .Include(s => s.AssignedDriver)
+            .Include(s => s.Images)
+            .FirstOrDefaultAsync(s => s.Id == scheduledId, ct)
+            ?? throw new InvalidOperationException("Agenda no encontrada.");
+
+        if (entity.Status != (byte)ScheduledPickupStatus.Pending)
+            throw new InvalidOperationException("Solo se pueden marcar como recogidos los pendientes.");
+
+        entity.PickedUpAtUtc = DateTime.UtcNow;
+        entity.UpdatedAtUtc = DateTime.UtcNow;
+        await PromoteToAcquiredInternalAsync(db, entity, actingUserId: _currentUser.UserId, ct);
+
+        await _audit.WriteAsync(
+            "PickupMarkedPickedUp",
+            "ScheduledVehiclePickup",
+            entity.Id,
+            $"Marcado recogido (staff): {entity.Vin}",
+            $"VehicleId={entity.PromotedVehicleId}",
+            ct);
+    }
+
+    /// <summary>Staff: revert a picked-up schedule back to pending and remove it from acquired vehicles.</summary>
+    public async Task StaffRevertToPendingAsync(int scheduledId, CancellationToken ct = default)
+    {
+        EnsureCanManageSchedule();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var entity = await db.ScheduledVehiclePickups
+            .FirstOrDefaultAsync(s => s.Id == scheduledId, ct)
+            ?? throw new InvalidOperationException("Agenda no encontrada.");
+
+        await RevertToPendingInternalAsync(db, entity, ct);
+
+        await _audit.WriteAsync(
+            "PickupMarkReverted",
+            "ScheduledVehiclePickup",
+            entity.Id,
+            $"Revertido a pendiente (staff): {entity.Vin}",
+            null,
             ct);
     }
 
@@ -482,125 +549,159 @@ public sealed class PickupScheduleService
     }
 
     /// <summary>
-    /// Promotes picked-up schedules into Vehicles after 12:00 Eastern.
-    /// Safe to call repeatedly (idempotent).
+    /// Legacy no-op: promotion now happens immediately when marking picked up.
+    /// Kept so old hosts that still register the background service do not break.
     /// </summary>
-    public async Task<int> PromoteDuePickupsAsync(CancellationToken ct = default)
+    public Task<int> PromoteDuePickupsAsync(CancellationToken ct = default) =>
+        Task.FromResult(0);
+
+    private async Task PromoteToAcquiredInternalAsync(
+        YardInventoryDbContext db,
+        ScheduledVehiclePickup s,
+        int actingUserId,
+        CancellationToken ct)
     {
-        var nowEt = YardTimeZone.NowEastern();
-        if (nowEt.TimeOfDay < TimeSpan.FromHours(12))
-            return 0;
+        if (s.Status == (byte)ScheduledPickupStatus.Promoted && s.PromotedVehicleId is not null)
+            return;
 
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var due = await db.ScheduledVehiclePickups
-            .Include(s => s.AssignedDriver)
-            .Include(s => s.Images)
-            .Where(s => s.Status == (byte)ScheduledPickupStatus.PickedUp)
-            .ToListAsync(ct);
-
-        var count = 0;
-        foreach (var s in due)
+        if (await db.Vehicles.AnyAsync(v => v.Vin == s.Vin && v.DeletedAtUtc == null, ct))
         {
-            if (await db.Vehicles.AnyAsync(v => v.Vin == s.Vin, ct))
-            {
-                // Already acquired somehow — just mark promoted if we can find it.
-                var existing = await db.Vehicles.FirstAsync(v => v.Vin == s.Vin, ct);
-                s.Status = (byte)ScheduledPickupStatus.Promoted;
-                s.PromotedVehicleId = existing.Id;
-                s.PromotedAtUtc = DateTime.UtcNow;
-                s.UpdatedAtUtc = DateTime.UtcNow;
-                count++;
-                continue;
-            }
-
-            var acquiredAt = s.PickedUpAtUtc is null
-                ? s.ScheduledPickupDate.ToDateTime(TimeOnly.MinValue)
-                : DateOnly.FromDateTime(YardTimeZone.ToEastern(s.PickedUpAtUtc.Value))
-                    .ToDateTime(TimeOnly.MinValue);
-
-            var vehicle = new Vehicle
-            {
-                Vin = s.Vin,
-                Year = s.Year,
-                Make = s.Make,
-                Model = s.Model,
-                TransmissionType = s.TransmissionType,
-                DriveType = s.DriveType,
-                Mileage = s.Mileage,
-                PurchasePrice = s.PurchasePrice,
-                Observations = s.Observations,
-                AcquisitionLocation = s.PickupAddress,
-                SellerName = s.SellerName,
-                SellerPhone = s.SellerPhone,
-                SellerEmail = s.SellerEmail,
-                PickupDriver = s.AssignedDriver?.DisplayName,
-                PaymentMethod = s.PaymentMethod,
-                VehicleSourceId = s.VehicleSourceId,
-                AcquiredAt = acquiredAt,
-                AcquiredByUserId = s.CreatedByUserId,
-                PalletId = null,
-                ImageRelativePath = s.ImageRelativePath,
-                CreatedAtUtc = DateTime.UtcNow
-            };
-
-            db.Vehicles.Add(vehicle);
-            await db.SaveChangesAsync(ct);
-
-            foreach (var img in s.Images.OrderBy(i => i.SortOrder))
-            {
-                db.VehicleImages.Add(new VehicleImage
-                {
-                    VehicleId = vehicle.Id,
-                    RelativePath = img.RelativePath,
-                    SortOrder = img.SortOrder,
-                    CreatedAtUtc = DateTime.UtcNow
-                });
-            }
-
-            db.InventoryMovements.Add(new InventoryMovement
-            {
-                MovementType = (int)MovementType.Acquired,
-                VehicleId = vehicle.Id,
-                UserId = s.CreatedByUserId,
-                Notes = $"Promovido desde agenda de recolección #{s.Id}",
-                MovedAtUtc = DateTime.UtcNow
-            });
-
+            var existing = await db.Vehicles.FirstAsync(v => v.Vin == s.Vin && v.DeletedAtUtc == null, ct);
             s.Status = (byte)ScheduledPickupStatus.Promoted;
-            s.PromotedVehicleId = vehicle.Id;
+            s.PromotedVehicleId = existing.Id;
             s.PromotedAtUtc = DateTime.UtcNow;
+            s.PickedUpAtUtc ??= DateTime.UtcNow;
             s.UpdatedAtUtc = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
-
-            await _audit.WriteForUserAsync(
-                s.CreatedByUserId,
-                "PickupPromotedToAcquired",
-                "ScheduledVehiclePickup",
-                s.Id,
-                $"Agenda promovida a adquiridos: {s.Vin}",
-                $"VehicleId={vehicle.Id} (12:00 ET)",
-                ct);
-
-            count++;
+            return;
         }
 
-        return count;
+        // Ensure navigation for driver name if not loaded.
+        if (s.AssignedDriverUserId is not null && s.AssignedDriver is null)
+        {
+            await db.Entry(s).Reference(x => x.AssignedDriver).LoadAsync(ct);
+        }
+
+        if (s.Images.Count == 0)
+            await db.Entry(s).Collection(x => x.Images).LoadAsync(ct);
+
+        var acquiredAt = s.PickedUpAtUtc is null
+            ? s.ScheduledPickupDate.ToDateTime(TimeOnly.MinValue)
+            : DateOnly.FromDateTime(YardTimeZone.ToEastern(s.PickedUpAtUtc.Value))
+                .ToDateTime(TimeOnly.MinValue);
+
+        var vehicle = new Vehicle
+        {
+            Vin = s.Vin,
+            Year = s.Year,
+            Make = s.Make,
+            Model = s.Model,
+            TransmissionType = s.TransmissionType,
+            DriveType = s.DriveType,
+            Mileage = s.Mileage,
+            PurchasePrice = s.PurchasePrice,
+            Observations = s.Observations,
+            AcquisitionLocation = s.PickupAddress,
+            SellerName = s.SellerName,
+            SellerPhone = s.SellerPhone,
+            SellerEmail = s.SellerEmail,
+            PickupDriver = s.AssignedDriver?.DisplayName,
+            PaymentMethod = s.PaymentMethod,
+            VehicleSourceId = s.VehicleSourceId,
+            AcquiredAt = acquiredAt,
+            AcquiredByUserId = actingUserId > 0 ? actingUserId : s.CreatedByUserId,
+            PalletId = null,
+            ImageRelativePath = s.ImageRelativePath,
+            CreatedAtUtc = DateTime.UtcNow
+        };
+
+        db.Vehicles.Add(vehicle);
+        await db.SaveChangesAsync(ct);
+
+        foreach (var img in s.Images.OrderBy(i => i.SortOrder))
+        {
+            db.VehicleImages.Add(new VehicleImage
+            {
+                VehicleId = vehicle.Id,
+                RelativePath = img.RelativePath,
+                SortOrder = img.SortOrder,
+                CreatedAtUtc = DateTime.UtcNow
+            });
+        }
+
+        db.InventoryMovements.Add(new InventoryMovement
+        {
+            MovementType = (int)MovementType.Acquired,
+            VehicleId = vehicle.Id,
+            UserId = actingUserId > 0 ? actingUserId : s.CreatedByUserId,
+            Notes = $"Recogido desde agenda de recolección #{s.Id}",
+            MovedAtUtc = DateTime.UtcNow
+        });
+
+        s.Status = (byte)ScheduledPickupStatus.Promoted;
+        s.PromotedVehicleId = vehicle.Id;
+        s.PromotedAtUtc = DateTime.UtcNow;
+        s.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
+    private async Task RevertToPendingInternalAsync(
+        YardInventoryDbContext db,
+        ScheduledVehiclePickup entity,
+        CancellationToken ct)
+    {
+        var isPicked = entity.Status is (byte)ScheduledPickupStatus.PickedUp
+            or (byte)ScheduledPickupStatus.Promoted;
+        if (!isPicked)
+            throw new InvalidOperationException("Solo se puede revertir un vehículo ya marcado como recogido.");
+
+        if (entity.PromotedVehicleId is int vehicleId)
+        {
+            var vehicle = await db.Vehicles
+                .Include(v => v.Images)
+                .FirstOrDefaultAsync(v => v.Id == vehicleId, ct);
+
+            if (vehicle is not null)
+            {
+                if (vehicle.PalletId is not null)
+                    throw new InvalidOperationException(
+                        "No se puede revertir: el vehículo ya tiene ubicación en la yarda.");
+                if (vehicle.InvoiceNumber is not null || vehicle.SignedAtUtc is not null)
+                    throw new InvalidOperationException(
+                        "No se puede revertir: el vehículo ya tiene recibo o firma.");
+
+                var movements = await db.InventoryMovements
+                    .Where(m => m.VehicleId == vehicle.Id)
+                    .ToListAsync(ct);
+                db.InventoryMovements.RemoveRange(movements);
+                db.VehicleImages.RemoveRange(vehicle.Images);
+                db.Vehicles.Remove(vehicle);
+            }
+        }
+
+        entity.Status = (byte)ScheduledPickupStatus.Pending;
+        entity.PickedUpAtUtc = null;
+        entity.PromotedVehicleId = null;
+        entity.PromotedAtUtc = null;
+        entity.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
     }
 
     public static bool CanDriverEditToday(ScheduledVehiclePickup entity)
     {
-        if (entity.Status == (byte)ScheduledPickupStatus.Promoted)
-            return false;
-
         if (entity.Status == (byte)ScheduledPickupStatus.Pending)
-            return true;
+            return entity.ScheduledPickupDate == YardTimeZone.TodayEastern();
 
+        // Picked up / promoted: allow same-calendar-day revert (NC).
         if (entity.PickedUpAtUtc is null)
-            return true;
+            return entity.ScheduledPickupDate == YardTimeZone.TodayEastern();
 
         var pickedEt = YardTimeZone.ToEastern(entity.PickedUpAtUtc.Value);
         return DateOnly.FromDateTime(pickedEt) == YardTimeZone.TodayEastern();
     }
+
+    public static bool IsPickedUpStatus(byte status) =>
+        status is (byte)ScheduledPickupStatus.PickedUp or (byte)ScheduledPickupStatus.Promoted;
 
     public static IReadOnlyList<string> GetImagePaths(ScheduledVehiclePickup s)
     {

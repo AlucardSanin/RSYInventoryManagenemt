@@ -58,7 +58,6 @@ builder.Services.AddHttpClient<DocuSealClient>((sp, client) =>
     client.Timeout = TimeSpan.FromSeconds(60);
 });
 builder.Services.AddScoped<VehicleInvoiceService>();
-builder.Services.AddHostedService<PickupPromotionHostedService>();
 
 var app = builder.Build();
 

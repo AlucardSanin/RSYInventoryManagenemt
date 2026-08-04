@@ -10,7 +10,7 @@
 
 <PageHeader Title="Agenda de recolección de vehículos"
             Eyebrow="Trabajo diario"
-            Lead="Programa recogidas, asigna chofer y genera reportes. Los marcados como recogidos pasan a Adquiridos a las 12:00 (hora de Carolina del Norte).">
+            Lead="Programa recogidas, asigna chofer y genera reportes. Al marcar Recogido pasa de inmediato a Adquiridos; esos recogidos salen de esta agenda a la medianoche (hora NC).">
     @if (CurrentUser.CanManagePickupSchedule)
     {
         <a class="btn btn-primary" href="vehicles/pickups/new">Agendar recolección</a>
@@ -109,7 +109,7 @@ else
                                         }
                                         else
                                         {
-                                            <span class="badge-status badge-status--ok">Adquirido</span>
+                                            <span class="badge-status badge-status--ok">Recogido</span>
                                         }
                                     </td>
                                     <td>@(r.PickedUpAtEastern?.ToString("yyyy-MM-dd HH:mm") ?? "—")</td>
@@ -192,7 +192,7 @@ else
                 </select>
             </div>
             <div class="col-md-4">
-                <p class="form-hint mb-0">@Filtered.Count() programados · promoción a Adquiridos a las 12:00 ET</p>
+                <p class="form-hint mb-0">@Filtered.Count() en agenda · los Recogido salen a la medianoche (hora NC)</p>
             </div>
         </div>
     </div>
@@ -243,7 +243,7 @@ else
                                 }
                                 else
                                 {
-                                    <span class="badge-status badge-status--ok">Adquirido</span>
+                                    <span class="badge-status badge-status--ok">Recogido</span>
                                 }
                             </td>
                             <td>
@@ -256,9 +256,20 @@ else
                                 {
                                     <a class="btn btn-sm btn-outline-primary" href="@($"vehicles/pickups/{s.Id}/edit")">Editar</a>
                                     <button type="button"
+                                            class="btn btn-sm btn-success"
+                                            disabled="@Busy.IsBusy"
+                                            @onclick="() => AskStaffPick(s)">Recogido</button>
+                                    <button type="button"
                                             class="btn btn-sm btn-outline-danger"
                                             disabled="@Busy.IsBusy"
                                             @onclick="() => AskDelete(s)">Eliminar</button>
+                                }
+                                else if (PickupScheduleService.IsPickedUpStatus(s.Status))
+                                {
+                                    <button type="button"
+                                            class="btn btn-sm btn-outline-danger"
+                                            disabled="@Busy.IsBusy"
+                                            @onclick="() => AskStaffRevert(s)">No recogido</button>
                                 }
                                 else
                                 {
@@ -298,6 +309,56 @@ else
     </div>
 }
 
+@if (_staffPickTarget is not null)
+{
+    <div class="modal-backdrop show"></div>
+    <div class="modal d-block" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5">Marcar como recogido</h2>
+                    <button type="button" class="btn-close" @onclick="CancelStaffPick"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-0">
+                        ¿Seguro que quieres marcar como recogido
+                        <code>@_staffPickTarget.Vin</code>? Pasará a vehículos adquiridos.
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CancelStaffPick">Cancelar</button>
+                    <button type="button" class="btn btn-success" disabled="@Busy.IsBusy" @onclick="ConfirmStaffPickAsync">Sí, recogido</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_staffRevertTarget is not null)
+{
+    <div class="modal-backdrop show"></div>
+    <div class="modal d-block" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5">Revertir recogido</h2>
+                    <button type="button" class="btn-close" @onclick="CancelStaffRevert"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-0">
+                        ¿Seguro que quieres marcar como no recogido
+                        <code>@_staffRevertTarget.Vin</code>? Se quitará de vehículos adquiridos y volverá a pendiente.
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CancelStaffRevert">Cancelar</button>
+                    <button type="button" class="btn btn-danger" disabled="@Busy.IsBusy" @onclick="ConfirmStaffRevertAsync">Sí, no recogido</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private List<ScheduledVehiclePickup>? _items;
     private List<User> _drivers = [];
@@ -310,6 +371,8 @@ else
     private DateTime? _reportFrom;
     private DateTime? _reportTo;
     private ScheduledVehiclePickup? _deleteTarget;
+    private ScheduledVehiclePickup? _staffPickTarget;
+    private ScheduledVehiclePickup? _staffRevertTarget;
 
     private IEnumerable<ScheduledVehiclePickup> Filtered
     {
@@ -383,6 +446,54 @@ else
 
     private void AskDelete(ScheduledVehiclePickup s) => _deleteTarget = s;
     private void CancelDelete() => _deleteTarget = null;
+
+    private void AskStaffPick(ScheduledVehiclePickup s) => _staffPickTarget = s;
+    private void CancelStaffPick() => _staffPickTarget = null;
+
+    private void AskStaffRevert(ScheduledVehiclePickup s) => _staffRevertTarget = s;
+    private void CancelStaffRevert() => _staffRevertTarget = null;
+
+    private async Task ConfirmStaffPickAsync()
+    {
+        if (_staffPickTarget is null || Busy.IsBusy) return;
+        var id = _staffPickTarget.Id;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                await Schedules.StaffMarkPickedUpAsync(id);
+                _items = await Schedules.GetActiveScheduleAsync();
+            }, "Marcando recogido…");
+            Toasts.Success("Marcado como recogido y añadido a adquiridos.");
+            _staffPickTarget = null;
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+            _error = ex.Message;
+        }
+    }
+
+    private async Task ConfirmStaffRevertAsync()
+    {
+        if (_staffRevertTarget is null || Busy.IsBusy) return;
+        var id = _staffRevertTarget.Id;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                await Schedules.StaffRevertToPendingAsync(id);
+                _items = await Schedules.GetActiveScheduleAsync();
+            }, "Revirtiendo…");
+            Toasts.Success("Revertido a pendiente.");
+            _staffRevertTarget = null;
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+            _error = ex.Message;
+        }
+    }
 
     private async Task CopyDriverLinkAsync(string link)
     {
