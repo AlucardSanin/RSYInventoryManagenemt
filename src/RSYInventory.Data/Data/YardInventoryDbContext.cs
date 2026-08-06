@@ -211,10 +211,17 @@ public partial class YardInventoryDbContext : DbContext
             entity.Property(e => e.SignedPdfRelativePath).HasMaxLength(400);
             entity.Property(e => e.Vin).HasMaxLength(17);
 
+            entity.HasIndex(e => e.PickupDriverUserId, "IX_Vehicles_PickupDriverUserId");
+
             entity.HasOne(d => d.AcquiredByUser).WithMany(p => p.Vehicles)
                 .HasForeignKey(d => d.AcquiredByUserId)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_Vehicles_Users");
+
+            entity.HasOne(d => d.PickupDriverUser).WithMany(p => p.PickedUpVehicles)
+                .HasForeignKey(d => d.PickupDriverUserId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("FK_Vehicles_PickupDriverUser");
 
             entity.HasOne(d => d.Pallet).WithMany(p => p.Vehicles)
                 .HasForeignKey(d => d.PalletId)

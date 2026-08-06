@@ -374,15 +374,124 @@ public sealed class PickupScheduleService
             .Where(s => s.AssignedDriverUserId == driver.Id
                         && s.Status != (byte)ScheduledPickupStatus.Pending);
 
-        if (from is not null)
-            q = q.Where(s => s.ScheduledPickupDate >= from);
-        if (to is not null)
-            q = q.Where(s => s.ScheduledPickupDate <= to);
+        // Prefer actual pickup day (ET); fall back to scheduled date.
+        if (from is not null || to is not null)
+        {
+            var fromDate = from ?? DateOnly.MinValue;
+            var toDate = to ?? DateOnly.MaxValue;
+            var fromUtc = TimeZoneInfo.ConvertTimeToUtc(fromDate.ToDateTime(TimeOnly.MinValue), YardTimeZone.EasternInfo);
+            var toUtcExclusive = TimeZoneInfo.ConvertTimeToUtc(
+                toDate.AddDays(1).ToDateTime(TimeOnly.MinValue),
+                YardTimeZone.EasternInfo);
 
-        return await q
+            q = q.Where(s =>
+                (s.PickedUpAtUtc != null
+                 && s.PickedUpAtUtc >= fromUtc
+                 && s.PickedUpAtUtc < toUtcExclusive)
+                || (s.PickedUpAtUtc == null
+                    && s.PromotedAtUtc != null
+                    && s.PromotedAtUtc >= fromUtc
+                    && s.PromotedAtUtc < toUtcExclusive)
+                || (s.PickedUpAtUtc == null
+                    && s.PromotedAtUtc == null
+                    && s.ScheduledPickupDate >= fromDate
+                    && s.ScheduledPickupDate <= toDate));
+        }
+
+        var scheduled = await q
             .OrderByDescending(s => s.PickedUpAtUtc ?? s.PromotedAtUtc)
             .ThenByDescending(s => s.Id)
             .ToListAsync(ct);
+
+        var promotedIds = scheduled
+            .Where(s => s.PromotedVehicleId is not null)
+            .Select(s => s.PromotedVehicleId!.Value)
+            .ToHashSet();
+
+        // Also include acquired vehicles linked to this driver (manual acquire / legacy text).
+        var vehicleQuery = db.Vehicles
+            .AsNoTracking()
+            .Include(v => v.VehicleSource)
+            .Include(v => v.Images)
+            .Where(v => v.DeletedAtUtc == null
+                        && v.PickupDriverUserId == driver.Id
+                        && !promotedIds.Contains(v.Id));
+
+        if (from is not null)
+        {
+            var fromDt = from.Value.ToDateTime(TimeOnly.MinValue);
+            vehicleQuery = vehicleQuery.Where(v => v.AcquiredAt >= fromDt);
+        }
+
+        if (to is not null)
+        {
+            var toExclusive = to.Value.AddDays(1).ToDateTime(TimeOnly.MinValue);
+            vehicleQuery = vehicleQuery.Where(v => v.AcquiredAt < toExclusive);
+        }
+
+        var vehicles = await vehicleQuery
+            .OrderByDescending(v => v.AcquiredAt)
+            .ThenByDescending(v => v.Id)
+            .ToListAsync(ct);
+
+        var fromVehicles = vehicles.Select(ToHistoryPickup).ToList();
+
+        return scheduled
+            .Concat(fromVehicles)
+            .OrderByDescending(s => s.PickedUpAtUtc ?? s.PromotedAtUtc ?? s.ScheduledPickupDate.ToDateTime(TimeOnly.MinValue))
+            .ThenByDescending(s => Math.Abs(s.Id))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Builds a read-only schedule-shaped row for driver history from an acquired vehicle.
+    /// Negative Id marks it as not editable via schedule actions.
+    /// </summary>
+    private static ScheduledVehiclePickup ToHistoryPickup(Vehicle v)
+    {
+        var acquiredDate = DateOnly.FromDateTime(v.AcquiredAt);
+        var pickedUtc = TimeZoneInfo.ConvertTimeToUtc(
+            acquiredDate.ToDateTime(new TimeOnly(12, 0)),
+            YardTimeZone.EasternInfo);
+
+        return new ScheduledVehiclePickup
+        {
+            Id = -v.Id,
+            Vin = v.Vin,
+            Year = v.Year,
+            Make = v.Make,
+            Model = v.Model,
+            TransmissionType = v.TransmissionType,
+            DriveType = v.DriveType,
+            Mileage = v.Mileage,
+            PurchasePrice = v.PurchasePrice,
+            Observations = v.Observations,
+            PickupAddress = v.AcquisitionLocation,
+            SellerName = v.SellerName,
+            SellerPhone = v.SellerPhone,
+            SellerEmail = v.SellerEmail,
+            PaymentMethod = v.PaymentMethod,
+            VehicleSourceId = v.VehicleSourceId,
+            VehicleSource = v.VehicleSource,
+            ScheduledPickupDate = acquiredDate,
+            AssignedDriverUserId = v.PickupDriverUserId,
+            Status = (byte)ScheduledPickupStatus.Promoted,
+            PickedUpAtUtc = pickedUtc,
+            PromotedAtUtc = pickedUtc,
+            PromotedVehicleId = v.Id,
+            ImageRelativePath = v.ImageRelativePath,
+            Images = (v.Images ?? [])
+                .OrderBy(i => i.SortOrder)
+                .Select(i => new ScheduledVehiclePickupImage
+                {
+                    RelativePath = i.RelativePath,
+                    SortOrder = i.SortOrder,
+                    CreatedAtUtc = i.CreatedAtUtc
+                })
+                .ToList(),
+            CreatedAtUtc = v.CreatedAtUtc,
+            CreatedByUserId = v.AcquiredByUserId
+        };
     }
 
     public async Task MarkPickedUpAsync(Guid token, int scheduledId, CancellationToken ct = default)
@@ -504,11 +613,6 @@ public sealed class PickupScheduleService
         if (driverUserId is > 0)
             q = q.Where(s => s.AssignedDriverUserId == driverUserId);
 
-        if (from is not null)
-            q = q.Where(s => s.ScheduledPickupDate >= from);
-        if (to is not null)
-            q = q.Where(s => s.ScheduledPickupDate <= to);
-
         var statuses = new List<byte>();
         if (includePending) statuses.Add((byte)ScheduledPickupStatus.Pending);
         if (includePickedUp)
@@ -519,18 +623,30 @@ public sealed class PickupScheduleService
 
         q = q.Where(s => statuses.Contains(s.Status));
 
-        var rows = await q
-            .OrderBy(s => s.ScheduledPickupDate)
-            .ThenBy(s => s.Id)
-            .ToListAsync(ct);
+        // Date: scheduled day in range, or actual pickup day (ET) in range.
+        if (from is not null || to is not null)
+        {
+            var fromDate = from ?? DateOnly.MinValue;
+            var toDate = to ?? DateOnly.MaxValue;
+            var fromUtc = TimeZoneInfo.ConvertTimeToUtc(fromDate.ToDateTime(TimeOnly.MinValue), YardTimeZone.EasternInfo);
+            var toUtcExclusive = TimeZoneInfo.ConvertTimeToUtc(
+                toDate.AddDays(1).ToDateTime(TimeOnly.MinValue),
+                YardTimeZone.EasternInfo);
 
-        rows = rows
-            .OrderBy(s => s.AssignedDriver?.DisplayName ?? "\uFFFF")
-            .ThenBy(s => s.ScheduledPickupDate)
-            .ThenBy(s => s.Id)
-            .ToList();
+            q = q.Where(s =>
+                (s.ScheduledPickupDate >= fromDate && s.ScheduledPickupDate <= toDate)
+                || (s.PickedUpAtUtc != null
+                    && s.PickedUpAtUtc >= fromUtc
+                    && s.PickedUpAtUtc < toUtcExclusive)
+                || (s.PickedUpAtUtc == null
+                    && s.PromotedAtUtc != null
+                    && s.PromotedAtUtc >= fromUtc
+                    && s.PromotedAtUtc < toUtcExclusive));
+        }
 
-        return rows.Select(s => new DriverReportRow(
+        var scheduled = await q.ToListAsync(ct);
+
+        var rows = scheduled.Select(s => new DriverReportRow(
             s.Id,
             s.AssignedDriver?.DisplayName ?? "Sin asignar",
             s.Vin,
@@ -546,6 +662,70 @@ public sealed class PickupScheduleService
             s.PickedUpAtUtc is null ? null : YardTimeZone.ToEastern(s.PickedUpAtUtc.Value),
             s.PromotedVehicleId,
             s.VehicleSource.Name)).ToList();
+
+        // Acquired vehicles linked to a driver (manual entry / backfill) that are not already in schedule rows.
+        if (includePickedUp)
+        {
+            var promotedIds = rows
+                .Where(r => r.PromotedVehicleId is not null)
+                .Select(r => r.PromotedVehicleId!.Value)
+                .ToHashSet();
+
+            var vehicleQuery = db.Vehicles
+                .AsNoTracking()
+                .Include(v => v.PickupDriverUser)
+                .Include(v => v.VehicleSource)
+                .Where(v => v.DeletedAtUtc == null
+                            && v.PickupDriverUserId != null
+                            && !promotedIds.Contains(v.Id));
+
+            if (driverUserId is > 0)
+                vehicleQuery = vehicleQuery.Where(v => v.PickupDriverUserId == driverUserId);
+
+            if (from is not null)
+            {
+                var fromDt = from.Value.ToDateTime(TimeOnly.MinValue);
+                vehicleQuery = vehicleQuery.Where(v => v.AcquiredAt >= fromDt);
+            }
+
+            if (to is not null)
+            {
+                var toExclusive = to.Value.AddDays(1).ToDateTime(TimeOnly.MinValue);
+                vehicleQuery = vehicleQuery.Where(v => v.AcquiredAt < toExclusive);
+            }
+
+            var vehicles = await vehicleQuery.ToListAsync(ct);
+            foreach (var v in vehicles)
+            {
+                var acquiredDate = DateOnly.FromDateTime(v.AcquiredAt);
+                var pickedUtc = TimeZoneInfo.ConvertTimeToUtc(
+                    acquiredDate.ToDateTime(new TimeOnly(12, 0)),
+                    YardTimeZone.EasternInfo);
+
+                rows.Add(new DriverReportRow(
+                    -v.Id,
+                    v.PickupDriverUser?.DisplayName ?? v.PickupDriver ?? "Sin asignar",
+                    v.Vin,
+                    v.Year,
+                    v.Make,
+                    v.Model,
+                    v.PurchasePrice,
+                    v.AcquisitionLocation,
+                    acquiredDate,
+                    null,
+                    ScheduledPickupStatus.Promoted,
+                    pickedUtc,
+                    YardTimeZone.ToEastern(pickedUtc),
+                    v.Id,
+                    v.VehicleSource.Name));
+            }
+        }
+
+        return rows
+            .OrderBy(r => r.DriverName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.ScheduledPickupDate)
+            .ThenBy(r => r.Vin, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     /// <summary>
@@ -605,6 +785,7 @@ public sealed class PickupScheduleService
             SellerName = s.SellerName,
             SellerPhone = s.SellerPhone,
             SellerEmail = s.SellerEmail,
+            PickupDriverUserId = s.AssignedDriverUserId,
             PickupDriver = s.AssignedDriver?.DisplayName,
             PaymentMethod = s.PaymentMethod,
             VehicleSourceId = s.VehicleSourceId,

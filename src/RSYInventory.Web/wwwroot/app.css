@@ -217,6 +217,29 @@ code, .mono {
     color: #b91c1c;
 }
 
+.pickup-status-cell {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.pickup-expired {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    color: #b45309;
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.pickup-expired__icon {
+    width: 0.95rem;
+    height: 0.95rem;
+    flex-shrink: 0;
+}
+
 .driver-card-list {
     display: flex;
     flex-direction: column;

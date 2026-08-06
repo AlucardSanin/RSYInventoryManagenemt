@@ -33,6 +33,8 @@ public partial class User
 
     public virtual ICollection<Vehicle> Vehicles { get; set; } = new List<Vehicle>();
 
+    public virtual ICollection<Vehicle> PickedUpVehicles { get; set; } = new List<Vehicle>();
+
     public virtual ICollection<ScheduledVehiclePickup> AssignedPickups { get; set; } = new List<ScheduledVehiclePickup>();
 
     public virtual ICollection<ScheduledVehiclePickup> CreatedPickups { get; set; } = new List<ScheduledVehiclePickup>();

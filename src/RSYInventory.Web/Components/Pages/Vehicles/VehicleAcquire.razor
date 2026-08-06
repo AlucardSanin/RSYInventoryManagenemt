@@ -164,8 +164,14 @@
                         <InputText class="form-control" @bind-Value="_model.SellerEmail" placeholder="correo@ejemplo.com" autocomplete="email" />
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">Chofer que recogió</label>
-                        <InputText class="form-control" @bind-Value="_model.PickupDriver" placeholder="Nombre del chofer" />
+                        <label class="form-label" for="driver-combo">Chofer que recogió</label>
+                        <SearchableCombo InputId="driver-combo"
+                                         Value="@DriverValue"
+                                         ValueChanged="OnDriverChangedAsync"
+                                         Options="_driverOptions"
+                                         AllowCustom="false"
+                                         Placeholder="Seleccionar chofer…"
+                                         EmptyHint="Sin choferes registrados" />
                     </div>
                 </div>
             </div>
@@ -244,6 +250,7 @@
     private List<ComboOption> _sourceOptions = [];
     private List<ComboOption> _makeOptions = [];
     private List<ComboOption> _modelOptions = [];
+    private List<ComboOption> _driverOptions = [];
     private CancellationTokenSource? _modelLoadCts;
     private bool _loadingModels;
     private string? _error;
@@ -259,6 +266,7 @@
     private string? TransmissionValue => _model.TransmissionType is null ? null : ((int)_model.TransmissionType.Value).ToString();
     private string? DriveValue => _model.DriveType is null ? null : ((int)_model.DriveType.Value).ToString();
     private string? SourceValue => _model.VehicleSourceId <= 0 ? null : _model.VehicleSourceId.ToString();
+    private string? DriverValue => _model.PickupDriverUserId is null or <= 0 ? null : _model.PickupDriverUserId.Value.ToString();
 
     private string MobileStepTitle => _mobileStep switch
     {
@@ -288,6 +296,13 @@
             {
                 _sources = await Vehicles.GetSourcesAsync();
                 _sourceOptions = _sources.Select(s => new ComboOption(s.Id.ToString(), s.Name)).ToList();
+
+                var drivers = await Vehicles.GetActiveDriversAsync();
+                _driverOptions =
+                [
+                    new ComboOption("", "— Sin asignar —"),
+                    .. drivers.Select(d => new ComboOption(d.Id.ToString(), d.DisplayName))
+                ];
 
                 var makes = await Vehicles.GetDistinctMakesAsync();
                 _makeOptions = makes.Select(m => new ComboOption(m, m)).ToList();
@@ -383,6 +398,12 @@
     private Task OnSourceChangedAsync(string? value)
     {
         _model.VehicleSourceId = int.TryParse(value, out var id) ? id : 0;
+        return Task.CompletedTask;
+    }
+
+    private Task OnDriverChangedAsync(string? value)
+    {
+        _model.PickupDriverUserId = int.TryParse(value, out var id) && id > 0 ? id : null;
         return Task.CompletedTask;
     }
 
@@ -561,7 +582,7 @@
                     _model.SellerName,
                     _model.SellerPhone,
                     _model.SellerEmail,
-                    _model.PickupDriver,
+                    _model.PickupDriverUserId,
                     _model.PaymentMethod);
 
                 if (_imageFiles.Count > 0)
@@ -636,7 +657,7 @@
         public string? SellerName { get; set; }
         public string? SellerPhone { get; set; }
         public string? SellerEmail { get; set; }
-        public string? PickupDriver { get; set; }
+        public int? PickupDriverUserId { get; set; }
         public int VehicleSourceId { get; set; }
         public DateTime AcquiredAt { get; set; }
     }

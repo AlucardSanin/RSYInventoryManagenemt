@@ -34,8 +34,11 @@ public partial class Vehicle
 
     public string? SellerEmail { get; set; }
 
-    /// <summary>Driver who picked up / collected the vehicle.</summary>
+    /// <summary>Driver who picked up / collected the vehicle (legacy / display cache).</summary>
     public string? PickupDriver { get; set; }
+
+    /// <summary>Registered driver user who picked up the vehicle.</summary>
+    public int? PickupDriverUserId { get; set; }
 
     /// <summary>How the purchase was paid (Cash, Zelle, Check, etc.).</summary>
     public string? PaymentMethod { get; set; }
@@ -79,6 +82,8 @@ public partial class Vehicle
     public DateTime? DeletedAtUtc { get; set; }
 
     public virtual User AcquiredByUser { get; set; } = null!;
+
+    public virtual User? PickupDriverUser { get; set; }
 
     public virtual ICollection<InventoryMovement> InventoryMovements { get; set; } = new List<InventoryMovement>();
 

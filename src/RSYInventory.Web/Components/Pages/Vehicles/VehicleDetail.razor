@@ -130,7 +130,9 @@ else if (_vehicle is not null && !_editing)
                     </div>
                     <div>
                         <dt>Chofer que recogió</dt>
-                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.PickupDriver) ? "—" : _vehicle.PickupDriver)</dd>
+                        <dd>@(string.IsNullOrWhiteSpace(_vehicle.PickupDriverUser?.DisplayName)
+                            ? (string.IsNullOrWhiteSpace(_vehicle.PickupDriver) ? "—" : _vehicle.PickupDriver)
+                            : _vehicle.PickupDriverUser!.DisplayName)</dd>
                     </div>
                     <div>
                         <dt>Método de pago</dt>
@@ -285,8 +287,14 @@ else if (_vehicle is not null && _editing)
                     <InputText class="form-control" @bind-Value="_edit.SellerEmail" />
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label">Chofer que recogió</label>
-                    <InputText class="form-control" @bind-Value="_edit.PickupDriver" placeholder="Nombre del chofer" />
+                    <label class="form-label" for="edit-driver-combo">Chofer que recogió</label>
+                    <SearchableCombo InputId="edit-driver-combo"
+                                     Value="@EditDriverValue"
+                                     ValueChanged="OnEditDriverChangedAsync"
+                                     Options="_driverOptions"
+                                     AllowCustom="false"
+                                     Placeholder="Seleccionar chofer…"
+                                     EmptyHint="Sin choferes registrados" />
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Método de pago</label>
@@ -368,6 +376,7 @@ else if (_vehicle is not null && _editing)
     private List<ComboOption> _sourceOptions = [];
     private List<ComboOption> _makeOptions = [];
     private List<ComboOption> _modelOptions = [];
+    private List<ComboOption> _driverOptions = [];
     private List<string> _images = [];
     private readonly List<IBrowserFile> _pendingFiles = [];
     private List<VehicleImage> _editImages = [];
@@ -393,6 +402,8 @@ else if (_vehicle is not null && _editing)
     private string? TransmissionValue => _edit.TransmissionType is null ? null : ((int)_edit.TransmissionType.Value).ToString();
     private string? DriveValue => _edit.DriveType is null ? null : ((int)_edit.DriveType.Value).ToString();
     private string? SourceValue => _edit.VehicleSourceId <= 0 ? null : _edit.VehicleSourceId.ToString();
+    private string? EditDriverValue =>
+        _edit.PickupDriverUserId is null or <= 0 ? null : _edit.PickupDriverUserId.Value.ToString();
 
     protected override async Task OnParametersSetAsync()
     {
@@ -464,7 +475,7 @@ else if (_vehicle is not null && _editing)
             SellerName = _vehicle.SellerName,
             SellerPhone = _vehicle.SellerPhone,
             SellerEmail = _vehicle.SellerEmail,
-            PickupDriver = _vehicle.PickupDriver,
+            PickupDriverUserId = _vehicle.PickupDriverUserId,
             PaymentMethod = _vehicle.PaymentMethod,
             VehicleSourceId = _vehicle.VehicleSourceId,
             AcquiredAt = _vehicle.AcquiredAt
@@ -485,6 +496,20 @@ else if (_vehicle is not null && _editing)
                     _sourceOptions.Insert(0, new ComboOption(
                         _vehicle.VehicleSourceId.ToString(),
                         $"{_vehicle.VehicleSource.Name} (inactiva)"));
+                }
+
+                var drivers = await Vehicles.GetActiveDriversAsync();
+                _driverOptions =
+                [
+                    new ComboOption("", "— Sin asignar —"),
+                    .. drivers.Select(d => new ComboOption(d.Id.ToString(), d.DisplayName))
+                ];
+                if (_edit.PickupDriverUserId is null or <= 0
+                    && !string.IsNullOrWhiteSpace(_vehicle.PickupDriver))
+                {
+                    _edit.PickupDriverUserId = DriverNameMatcher.Match(
+                        _vehicle.PickupDriver,
+                        drivers.Select(d => (d.Id, d.DisplayName)).ToList());
                 }
 
                 var makes = await Vehicles.GetDistinctMakesAsync();
@@ -578,6 +603,12 @@ else if (_vehicle is not null && _editing)
     private Task OnSourceChangedAsync(string? value)
     {
         _edit.VehicleSourceId = int.TryParse(value, out var id) ? id : 0;
+        return Task.CompletedTask;
+    }
+
+    private Task OnEditDriverChangedAsync(string? value)
+    {
+        _edit.PickupDriverUserId = int.TryParse(value, out var id) && id > 0 ? id : null;
         return Task.CompletedTask;
     }
 
@@ -716,7 +747,7 @@ else if (_vehicle is not null && _editing)
                     _edit.SellerName,
                     _edit.SellerPhone,
                     _edit.SellerEmail,
-                    _edit.PickupDriver,
+                    _edit.PickupDriverUserId,
                     _edit.PaymentMethod);
 
                 var failed = 0;
@@ -796,7 +827,7 @@ else if (_vehicle is not null && _editing)
         public string? SellerName { get; set; }
         public string? SellerPhone { get; set; }
         public string? SellerEmail { get; set; }
-        public string? PickupDriver { get; set; }
+        public int? PickupDriverUserId { get; set; }
         public string? PaymentMethod { get; set; }
         public int VehicleSourceId { get; set; }
         public DateTime AcquiredAt { get; set; }

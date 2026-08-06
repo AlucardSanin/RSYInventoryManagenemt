@@ -56,17 +56,53 @@ public class VehicleService
             .ToListAsync(ct);
     }
 
-    public async Task<List<string>> GetDistinctPickupDriversAsync(CancellationToken ct = default)
+    public async Task<List<User>> GetActiveDriversAsync(CancellationToken ct = default)
     {
         EnsureCanViewVehicles();
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        return await db.Vehicles
+        return await db.Users
             .AsNoTracking()
-            .Where(v => v.PickupDriver != null && v.PickupDriver != "")
-            .Select(v => v.PickupDriver!)
-            .Distinct()
-            .OrderBy(x => x)
+            .Where(u => u.IsActive && u.Roles.Any(r => r.Code == (int)AppRole.Driver))
+            .OrderBy(u => u.DisplayName)
             .ToListAsync(ct);
+    }
+
+    /// <summary>Links legacy free-text PickupDriver values to registered drivers when possible.</summary>
+    public async Task<int> BackfillPickupDriverLinksAsync(CancellationToken ct = default)
+    {
+        if (!_currentUser.CanEditVehicles)
+            throw new UnauthorizedAccessException("No tiene permiso para actualizar vehículos.");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var drivers = await db.Users
+            .AsNoTracking()
+            .Where(u => u.IsActive && u.Roles.Any(r => r.Code == (int)AppRole.Driver))
+            .Select(u => new { u.Id, u.DisplayName })
+            .ToListAsync(ct);
+        var driverTuples = drivers.Select(d => (d.Id, d.DisplayName)).ToList();
+
+        var vehicles = await db.Vehicles
+            .Where(v => v.PickupDriverUserId == null
+                        && v.PickupDriver != null
+                        && v.PickupDriver != ""
+                        && v.DeletedAtUtc == null)
+            .ToListAsync(ct);
+
+        var updated = 0;
+        foreach (var v in vehicles)
+        {
+            var matchId = DriverNameMatcher.Match(v.PickupDriver, driverTuples);
+            if (matchId is null) continue;
+            var name = drivers.First(d => d.Id == matchId.Value).DisplayName;
+            v.PickupDriverUserId = matchId;
+            v.PickupDriver = name;
+            v.UpdatedAtUtc = DateTime.UtcNow;
+            updated++;
+        }
+
+        if (updated > 0)
+            await db.SaveChangesAsync(ct);
+        return updated;
     }
 
     public async Task<List<Vehicle>> GetAllAsync(CancellationToken ct = default)
@@ -78,6 +114,7 @@ public class VehicleService
             .AsNoTracking()
             .Include(v => v.VehicleSource)
             .Include(v => v.AcquiredByUser)
+            .Include(v => v.PickupDriverUser)
             .Include(v => v.Images)
             .Include(v => v.Pallet)!.ThenInclude(p => p!.Row)!.ThenInclude(r => r!.Zone)
             .OrderByDescending(v => v.AcquiredAt)
@@ -88,7 +125,7 @@ public class VehicleService
     public async Task<(List<Vehicle> Items, int TotalCount)> GetPageAsync(
         string? search,
         string? locationFilter,
-        string? pickupDriver,
+        int? pickupDriverUserId,
         int page,
         int pageSize,
         CancellationToken ct = default)
@@ -107,11 +144,8 @@ public class VehicleService
         else if (locationFilter == "unlocated")
             q = q.Where(v => v.PalletId == null);
 
-        if (!string.IsNullOrWhiteSpace(pickupDriver))
-        {
-            var driver = pickupDriver.Trim();
-            q = q.Where(v => v.PickupDriver != null && v.PickupDriver == driver);
-        }
+        if (pickupDriverUserId is > 0)
+            q = q.Where(v => v.PickupDriverUserId == pickupDriverUserId);
 
         var s = search?.Trim();
         if (!string.IsNullOrEmpty(s))
@@ -124,6 +158,7 @@ public class VehicleService
                 || (v.Model != null && EF.Functions.Like(v.Model, like))
                 || (v.Year != null && EF.Functions.Like(v.Year.ToString()!, like))
                 || (v.PickupDriver != null && EF.Functions.Like(v.PickupDriver, like))
+                || (v.PickupDriverUser != null && EF.Functions.Like(v.PickupDriverUser.DisplayName, like))
                 || EF.Functions.Like(v.VehicleSource.Name, like)
                 || (v.InvoiceNumber != null && (
                     EF.Functions.Like(v.InvoiceNumber.ToString()!, like)
@@ -135,6 +170,7 @@ public class VehicleService
 
         var items = await q
             .Include(v => v.VehicleSource)
+            .Include(v => v.PickupDriverUser)
             .Include(v => v.Images)
             .Include(v => v.Pallet)!.ThenInclude(p => p!.Row)!.ThenInclude(r => r!.Zone)
             .OrderByDescending(v => v.AcquiredAt)
@@ -156,6 +192,7 @@ public class VehicleService
             .AsNoTracking()
             .Include(v => v.VehicleSource)
             .Include(v => v.AcquiredByUser)
+            .Include(v => v.PickupDriverUser)
             .Include(v => v.Images)
             .Include(v => v.Pallet)!.ThenInclude(p => p!.Row)!.ThenInclude(r => r!.Zone)
             .FirstOrDefaultAsync(v => v.Id == id, ct);
@@ -183,7 +220,7 @@ public class VehicleService
         string? sellerName = null,
         string? sellerPhone = null,
         string? sellerEmail = null,
-        string? pickupDriver = null,
+        int? pickupDriverUserId = null,
         string? paymentMethod = null,
         CancellationToken ct = default)
     {
@@ -202,6 +239,8 @@ public class VehicleService
         if (!await db.VehicleSources.AnyAsync(s => s.Id == vehicleSourceId && s.IsActive, ct))
             throw new InvalidOperationException("Fuente de adquisición inválida.");
 
+        var (driverUserId, driverName) = await ResolvePickupDriverAsync(db, pickupDriverUserId, ct);
+
         var vehicle = new Vehicle
         {
             Vin = vin,
@@ -217,7 +256,8 @@ public class VehicleService
             SellerName = NullIfWhiteSpace(sellerName),
             SellerPhone = NullIfWhiteSpace(sellerPhone),
             SellerEmail = NullIfWhiteSpace(sellerEmail),
-            PickupDriver = NullIfWhiteSpace(pickupDriver),
+            PickupDriverUserId = driverUserId,
+            PickupDriver = driverName,
             PaymentMethod = NullIfWhiteSpace(paymentMethod),
             VehicleSourceId = vehicleSourceId,
             AcquiredAt = acquiredAt,
@@ -428,7 +468,7 @@ public class VehicleService
         string? sellerName = null,
         string? sellerPhone = null,
         string? sellerEmail = null,
-        string? pickupDriver = null,
+        int? pickupDriverUserId = null,
         string? paymentMethod = null,
         CancellationToken ct = default)
     {
@@ -454,6 +494,8 @@ public class VehicleService
         if (!source.IsActive && vehicle.VehicleSourceId != vehicleSourceId)
             throw new InvalidOperationException("Fuente de adquisición inválida.");
 
+        var (driverUserId, driverName) = await ResolvePickupDriverAsync(db, pickupDriverUserId, ct);
+
         vehicle.Vin = vin;
         vehicle.Year = year;
         vehicle.Make = string.IsNullOrWhiteSpace(make) ? null : make.Trim();
@@ -469,7 +511,8 @@ public class VehicleService
         vehicle.SellerName = NullIfWhiteSpace(sellerName);
         vehicle.SellerPhone = NullIfWhiteSpace(sellerPhone);
         vehicle.SellerEmail = NullIfWhiteSpace(sellerEmail);
-        vehicle.PickupDriver = NullIfWhiteSpace(pickupDriver);
+        vehicle.PickupDriverUserId = driverUserId;
+        vehicle.PickupDriver = driverName;
         vehicle.PaymentMethod = NullIfWhiteSpace(paymentMethod);
         vehicle.VehicleSourceId = vehicleSourceId;
         vehicle.AcquiredAt = acquiredAt;
@@ -628,6 +671,25 @@ public class VehicleService
         vehicle.SignedAtUtc = null;
         vehicle.UpdatedAtUtc = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
+    }
+
+    private static async Task<(int? UserId, string? DisplayName)> ResolvePickupDriverAsync(
+        YardInventoryDbContext db,
+        int? pickupDriverUserId,
+        CancellationToken ct)
+    {
+        if (pickupDriverUserId is null or <= 0)
+            return (null, null);
+
+        var driver = await db.Users
+            .AsNoTracking()
+            .FirstOrDefaultAsync(u =>
+                u.Id == pickupDriverUserId
+                && u.IsActive
+                && u.Roles.Any(r => r.Code == (int)AppRole.Driver), ct)
+            ?? throw new InvalidOperationException("Chofer inválido o inactivo.");
+
+        return (driver.Id, driver.DisplayName);
     }
 
     private static string? NullIfWhiteSpace(string? value)

@@ -1,5 +1,6 @@
 @page "/vehicles/pickups"
 @inject PickupScheduleService Schedules
+@inject DriverReportPdfService ReportPdf
 @inject ICurrentUserService CurrentUser
 @inject UiBusyService Busy
 @inject ToastService Toasts
@@ -61,23 +62,42 @@ else
                     <option value="picked">Solo recogidos</option>
                 </select>
             </div>
-            <div class="col-md-2">
-                <button type="button" class="btn btn-outline-primary w-100" @onclick="RunReportAsync" disabled="@Busy.IsBusy">
-                    Generar
+            <div class="col-md-2 d-flex flex-column gap-2">
+                <button type="button" class="btn btn-outline-primary w-100" @onclick="PreviewReportAsync" disabled="@Busy.IsBusy">
+                    Previsualizar
+                </button>
+                <button type="button"
+                        class="btn btn-primary w-100"
+                        @onclick="DownloadReportPdfAsync"
+                        disabled="@(Busy.IsBusy || _report is null || _report.Count == 0)">
+                    Generar PDF
                 </button>
             </div>
         </div>
 
         @if (_report is not null)
         {
-            <div class="table-shell mt-3">
+            <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mt-3">
+                <p class="form-hint mb-0">
+                    @if (_report.Count == 0)
+                    {
+                        <text>Sin resultados</text>
+                    }
+                    else
+                    {
+                        <text>Mostrando @_reportFromIndex–@_reportToIndex de @_report.Count · página @_reportPage de @_reportPageCount</text>
+                    }
+                </p>
+                <button type="button" class="btn btn-sm btn-link" @onclick="ClearReportPreview">Ocultar vista previa</button>
+            </div>
+            <div class="table-shell mt-2">
                 @if (_report.Count == 0)
                 {
                     <p class="mb-0 text-muted">Sin resultados para ese filtro.</p>
                 }
                 else
                 {
-                    <table class="table table-sm table-hover align-middle">
+                    <table class="table table-sm table-hover align-middle mb-0">
                         <thead>
                             <tr>
                                 <th>Chofer</th>
@@ -92,7 +112,7 @@ else
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var r in _report)
+                            @foreach (var r in ReportPageRows)
                             {
                                 <tr>
                                     <td>@r.DriverName</td>
@@ -105,7 +125,7 @@ else
                                     <td>
                                         @if (r.Status == ScheduledPickupStatus.Pending)
                                         {
-                                            <span class="badge-status badge-status--danger">Pendiente</span>
+                                            <PendingStatusBadge ScheduledDate="@r.ScheduledPickupDate" />
                                         }
                                         else
                                         {
@@ -117,6 +137,21 @@ else
                             }
                         </tbody>
                     </table>
+
+                    @if (_reportPageCount > 1)
+                    {
+                        <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mt-3">
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-secondary"
+                                    disabled="@(_reportPage <= 1 || Busy.IsBusy)"
+                                    @onclick="PreviousReportPage">Anterior</button>
+                            <span class="form-hint mb-0">Página @_reportPage / @_reportPageCount</span>
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-secondary"
+                                    disabled="@(_reportPage >= _reportPageCount || Busy.IsBusy)"
+                                    @onclick="NextReportPage">Siguiente</button>
+                        </div>
+                    }
                 }
             </div>
         }
@@ -239,7 +274,7 @@ else
                             <td>
                                 @if (s.Status == (byte)ScheduledPickupStatus.Pending)
                                 {
-                                    <span class="badge-status badge-status--danger">Pendiente</span>
+                                    <PendingStatusBadge ScheduledDate="@s.ScheduledPickupDate" />
                                 }
                                 else
                                 {
@@ -360,9 +395,12 @@ else
 }
 
 @code {
+    private const int ReportPageSize = 10;
+
     private List<ScheduledVehiclePickup>? _items;
     private List<User> _drivers = [];
     private List<DriverReportRow>? _report;
+    private int _reportPage = 1;
     private string? _error;
     private string _search = string.Empty;
     private string _driverFilter = string.Empty;
@@ -373,6 +411,22 @@ else
     private ScheduledVehiclePickup? _deleteTarget;
     private ScheduledVehiclePickup? _staffPickTarget;
     private ScheduledVehiclePickup? _staffRevertTarget;
+
+    private int _reportPageCount =>
+        _report is null || _report.Count == 0
+            ? 1
+            : Math.Max(1, (int)Math.Ceiling(_report.Count / (double)ReportPageSize));
+
+    private int _reportFromIndex =>
+        _report is null || _report.Count == 0 ? 0 : ((_reportPage - 1) * ReportPageSize) + 1;
+
+    private int _reportToIndex =>
+        _report is null ? 0 : Math.Min(_reportPage * ReportPageSize, _report.Count);
+
+    private IEnumerable<DriverReportRow> ReportPageRows =>
+        _report is null
+            ? []
+            : _report.Skip((_reportPage - 1) * ReportPageSize).Take(ReportPageSize);
 
     private IEnumerable<ScheduledVehiclePickup> Filtered
     {
@@ -422,26 +476,113 @@ else
         }
     }
 
-    private async Task RunReportAsync()
+    private async Task PreviewReportAsync()
     {
         _error = null;
+        _reportPage = 1;
         try
         {
             await Busy.RunAsync(async () =>
             {
-                var includePending = _reportMode is "both" or "pending";
-                var includePicked = _reportMode is "both" or "picked";
-                int? driverId = int.TryParse(_reportDriverId, out var id) && id > 0 ? id : null;
-                DateOnly? from = _reportFrom is null ? null : DateOnly.FromDateTime(_reportFrom.Value);
-                DateOnly? to = _reportTo is null ? null : DateOnly.FromDateTime(_reportTo.Value);
-                _report = await Schedules.GetDriverReportAsync(driverId, includePending, includePicked, from, to);
-            }, "Generando reporte…");
+                _report = await LoadReportRowsAsync();
+            }, "Cargando vista previa…");
+
+            if (_report is null || _report.Count == 0)
+                Toasts.Info("Sin resultados para ese filtro.");
         }
         catch (Exception ex)
         {
             Toasts.Error(ex.Message);
             _error = ex.Message;
         }
+    }
+
+    private async Task DownloadReportPdfAsync()
+    {
+        _error = null;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                // Fresh query so PDF matches current filters even without preview.
+                _report = await LoadReportRowsAsync();
+                if (_reportPage > _reportPageCount)
+                    _reportPage = _reportPageCount;
+            }, "Generando PDF…");
+
+            if (_report is null || _report.Count == 0)
+            {
+                Toasts.Info("Sin resultados para ese filtro.");
+                return;
+            }
+
+            var driverName = _drivers.FirstOrDefault(d => d.Id.ToString() == _reportDriverId)?.DisplayName;
+            DateOnly? from = _reportFrom is null ? null : DateOnly.FromDateTime(_reportFrom.Value);
+            DateOnly? to = _reportTo is null ? null : DateOnly.FromDateTime(_reportTo.Value);
+            var includeLabel = _reportMode switch
+            {
+                "pending" => "Solo pendientes",
+                "picked" => "Solo recogidos",
+                _ => "Pendientes y recogidos"
+            };
+
+            var bytes = ReportPdf.GeneratePdf(_report, driverName, from, to, includeLabel);
+            var slug = string.IsNullOrWhiteSpace(driverName) ? "todos" : SanitizeFileName(driverName);
+            var fromPart = from?.ToString("yyyyMMdd") ?? "inicio";
+            var toPart = to?.ToString("yyyyMMdd") ?? "fin";
+            var fileName = $"reporte-chofer-{slug}-{fromPart}-{toPart}.pdf";
+
+            await Js.InvokeVoidAsync(
+                "rsyDownloadFile",
+                fileName,
+                "application/pdf",
+                Convert.ToBase64String(bytes));
+            Toasts.Success($"PDF descargado ({_report.Count} filas).");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error("No se pudo generar el PDF: " + ex.Message);
+            _error = ex.Message;
+        }
+    }
+
+    private async Task<List<DriverReportRow>> LoadReportRowsAsync()
+    {
+        var includePending = _reportMode is "both" or "pending";
+        var includePicked = _reportMode is "both" or "picked";
+        int? driverId = int.TryParse(_reportDriverId, out var id) && id > 0 ? id : null;
+        DateOnly? from = _reportFrom is null ? null : DateOnly.FromDateTime(_reportFrom.Value);
+        DateOnly? to = _reportTo is null ? null : DateOnly.FromDateTime(_reportTo.Value);
+        return await Schedules.GetDriverReportAsync(driverId, includePending, includePicked, from, to);
+    }
+
+    private void ClearReportPreview()
+    {
+        _report = null;
+        _reportPage = 1;
+    }
+
+    private void PreviousReportPage()
+    {
+        if (_reportPage <= 1) return;
+        _reportPage--;
+    }
+
+    private void NextReportPage()
+    {
+        if (_reportPage >= _reportPageCount) return;
+        _reportPage++;
+    }
+
+    private static string SanitizeFileName(string value)
+    {
+        var chars = value.Trim().ToLowerInvariant()
+            .Select(c => char.IsLetterOrDigit(c) ? c : '-')
+            .ToArray();
+        var s = new string(chars);
+        while (s.Contains("--", StringComparison.Ordinal))
+            s = s.Replace("--", "-", StringComparison.Ordinal);
+        return s.Trim('-');
     }
 
     private void AskDelete(ScheduledVehiclePickup s) => _deleteTarget = s;

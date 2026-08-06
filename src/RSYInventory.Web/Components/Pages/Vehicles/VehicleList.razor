@@ -24,7 +24,7 @@
 {
     <div class="page-panel"><p class="mb-0 text-muted">Cargando vehículos…</p></div>
 }
-else if (_totalCount == 0 && string.IsNullOrWhiteSpace(_search) && string.IsNullOrEmpty(_locationFilter) && string.IsNullOrEmpty(_driverFilter))
+else if (_totalCount == 0 && string.IsNullOrWhiteSpace(_search) && string.IsNullOrEmpty(_locationFilter) && string.IsNullOrEmpty(_driverFilterId))
 {
     <div class="page-panel empty-state">
         <p class="empty-state__title">Aún no hay vehículos</p>
@@ -58,11 +58,11 @@ else
             </div>
             <div class="col-md-3">
                 <label class="form-label">Recogido por</label>
-                <select class="form-select" @bind="_driverFilter" @bind:after="ReloadFromFiltersAsync">
+                <select class="form-select" @bind="_driverFilterId" @bind:after="ReloadFromFiltersAsync">
                     <option value="">Todos</option>
-                    @foreach (var d in _driverOptions)
+                    @foreach (var d in _drivers)
                     {
-                        <option value="@d">@d</option>
+                        <option value="@d.Id">@d.DisplayName</option>
                     }
                 </select>
             </div>
@@ -143,7 +143,9 @@ else
                             <td>@(v.Mileage?.ToString("N0") ?? "—")</td>
                             <td>@UsdMoney.FormatOrDash(v.PurchasePrice)</td>
                             <td>@v.VehicleSource.Name</td>
-                            <td>@(string.IsNullOrWhiteSpace(v.PickupDriver) ? "—" : v.PickupDriver)</td>
+                            <td>@(string.IsNullOrWhiteSpace(v.PickupDriverUser?.DisplayName)
+                                ? (string.IsNullOrWhiteSpace(v.PickupDriver) ? "—" : v.PickupDriver)
+                                : v.PickupDriverUser!.DisplayName)</td>
                             <td>@v.AcquiredAt.ToString("yyyy-MM-dd")</td>
                             <td>
                                 @if (v.Pallet is null)
@@ -193,13 +195,13 @@ else
     private const int PageSize = 25;
 
     private List<Vehicle>? _items;
-    private List<string> _driverOptions = [];
+    private List<User> _drivers = [];
     private int _totalCount;
     private int _page = 1;
     private string? _error;
     private string _search = string.Empty;
     private string _locationFilter = string.Empty;
-    private string _driverFilter = string.Empty;
+    private string _driverFilterId = string.Empty;
     private ImageViewer? _viewer;
 
     private int _pageCount => Math.Max(1, (int)Math.Ceiling(_totalCount / (double)PageSize));
@@ -218,22 +220,29 @@ else
         {
             await Busy.RunAsync(async () =>
             {
-                _driverOptions = await Vehicles.GetDistinctPickupDriversAsync();
+                if (CurrentUser.CanEditVehicles)
+                {
+                    try { await Vehicles.BackfillPickupDriverLinksAsync(); }
+                    catch { /* column may not exist yet */ }
+                }
+
+                _drivers = await Vehicles.GetActiveDriversAsync();
                 await LoadPageAsync();
             }, "Cargando vehículos…");
         }
         catch (Exception ex)
         {
-            _error = ex.Message + " — ¿Ejecutaste los scripts SQL (incl. 007_VehicleImages)?";
+            _error = ex.Message + " — ¿Ejecutaste los scripts SQL (incl. 017_VehiclePickupDriverUser)?";
         }
     }
 
     private async Task LoadPageAsync()
     {
+        int? driverId = int.TryParse(_driverFilterId, out var id) && id > 0 ? id : null;
         var (items, total) = await Vehicles.GetPageAsync(
             _search,
             _locationFilter,
-            _driverFilter,
+            driverId,
             _page,
             PageSize);
         _items = items;
@@ -246,7 +255,7 @@ else
                 (items, total) = await Vehicles.GetPageAsync(
                     _search,
                     _locationFilter,
-                    _driverFilter,
+                    driverId,
                     _page,
                     PageSize);
                 _items = items;

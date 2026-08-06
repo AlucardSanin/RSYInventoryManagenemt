@@ -158,7 +158,7 @@ else
                 </div>
                 <div class="modal-footer">
                     @{
-                        var canEdit = PickupScheduleService.CanDriverEditToday(_selected);
+                        var canEdit = _selected.Id > 0 && PickupScheduleService.CanDriverEditToday(_selected);
                         var isPicked = PickupScheduleService.IsPickedUpStatus(_selected.Status);
                     }
                     @if (_selected.Status == (byte)ScheduledPickupStatus.Pending)
@@ -247,7 +247,7 @@ else
     private async Task ShowHistoryAsync()
     {
         _tab = "history";
-        await FilterHistoryTodayAsync();
+        await FilterHistoryWeekAsync();
     }
 
     private Task FilterHistoryTodayAsync() => FilterHistoryAsync("today");
