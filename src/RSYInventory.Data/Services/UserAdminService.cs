@@ -70,7 +70,7 @@ public sealed class UserAdminService
         displayName = displayName.Trim();
         email = string.IsNullOrWhiteSpace(email) ? null : email.Trim();
         preferredLanguage = NormalizeLanguage(preferredLanguage);
-        var driverOnly = roles.Count == 1 && roles.Contains(AppRole.Driver);
+        var driverOnly = roles.Count == 1 && IsPortalDriverRole(roles.First());
 
         if (string.IsNullOrWhiteSpace(userName))
             throw new InvalidOperationException("El nombre de usuario es obligatorio.");
@@ -89,7 +89,7 @@ public sealed class UserAdminService
             throw new InvalidOperationException("Ya existe un usuario con ese nombre.");
 
         var roleEntities = await ResolveRolesAsync(db, roles, ct);
-        var isDriver = roles.Contains(AppRole.Driver);
+        var needsToken = roles.Any(IsPortalDriverRole);
 
         var user = new User
         {
@@ -99,7 +99,7 @@ public sealed class UserAdminService
             PasswordHash = string.IsNullOrWhiteSpace(password) ? null : _passwords.Hash(password),
             IsActive = true,
             PreferredLanguage = preferredLanguage,
-            DriverAccessToken = isDriver ? Guid.NewGuid() : null,
+            DriverAccessToken = needsToken ? Guid.NewGuid() : null,
             CreatedAtUtc = DateTime.UtcNow,
             Roles = roleEntities
         };
@@ -156,7 +156,7 @@ public sealed class UserAdminService
         user.PreferredLanguage = preferredLanguage;
         user.Roles = await ResolveRolesAsync(db, roles, ct);
 
-        if (roles.Contains(AppRole.Driver))
+        if (roles.Any(IsPortalDriverRole))
             user.DriverAccessToken ??= Guid.NewGuid();
         else
             user.DriverAccessToken = null;
@@ -173,13 +173,27 @@ public sealed class UserAdminService
             .FirstOrDefaultAsync(u => u.Id == userId, ct)
             ?? throw new InvalidOperationException("Usuario no encontrado.");
 
-        if (!user.Roles.Any(r => r.Code == (int)AppRole.Driver))
-            throw new InvalidOperationException("Solo los choferes tienen enlace de agenda.");
+        if (!user.Roles.Any(r => IsPortalDriverRole((AppRole)r.Code)))
+            throw new InvalidOperationException("Solo los choferes (recolección, reciclaje o constructora) tienen enlace.");
 
         user.DriverAccessToken = Guid.NewGuid();
         await db.SaveChangesAsync(ct);
         return user.DriverAccessToken.Value;
     }
+
+    /// <summary>Relative portal path for a special/vehicle driver token.</summary>
+    public static string PortalPathForRoles(IEnumerable<AppRole> roles, Guid token)
+    {
+        var set = roles as ISet<AppRole> ?? roles.ToHashSet();
+        if (set.Contains(AppRole.RecycleDriver))
+            return $"r/{token}";
+        if (set.Contains(AppRole.ConstructorDriver))
+            return $"c/{token}";
+        return $"d/{token}";
+    }
+
+    public static bool IsPortalDriverRole(AppRole role) =>
+        role is AppRole.Driver or AppRole.RecycleDriver or AppRole.ConstructorDriver;
 
     private static string NormalizeLanguage(string? language) =>
         string.Equals(language, "en", StringComparison.OrdinalIgnoreCase) ? "en" : "es";
@@ -193,7 +207,7 @@ public sealed class UserAdminService
         var entities = await db.Roles.Where(r => codes.Contains(r.Code)).ToListAsync(ct);
         if (entities.Count != codes.Count)
             throw new InvalidOperationException(
-                "Uno o más roles no existen en la base de datos. Aplica el script SQL 015_DriverPickupSchedule.sql.");
+                "Uno o más roles no existen en la base de datos. Aplica 015_DriverPickupSchedule.sql y 018_SpecialDrivers.sql.");
         return entities;
     }
 

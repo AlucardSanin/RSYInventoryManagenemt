@@ -38,6 +38,12 @@ public partial class YardInventoryDbContext : DbContext
 
     public virtual DbSet<ScheduledVehiclePickupImage> ScheduledVehiclePickupImages { get; set; }
 
+    public virtual DbSet<RecycleLoad> RecycleLoads { get; set; }
+
+    public virtual DbSet<RecycleLoadDocument> RecycleLoadDocuments { get; set; }
+
+    public virtual DbSet<ConstructorActivityLog> ConstructorActivityLogs { get; set; }
+
     public virtual DbSet<Zone> Zones { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -327,6 +333,72 @@ public partial class YardInventoryDbContext : DbContext
                 .HasForeignKey(d => d.ScheduledId)
                 .OnDelete(DeleteBehavior.Cascade)
                 .HasConstraintName("FK_ScheduledVehiclePickupImages_Schedule");
+        });
+
+        modelBuilder.Entity<RecycleLoad>(entity =>
+        {
+            entity.HasIndex(e => new { e.DriverUserId, e.RecordedAtUtc }, "IX_RecycleLoads_DriverUserId_RecordedAtUtc")
+                .IsDescending(false, true);
+            entity.HasIndex(e => e.LoadExternalId, "IX_RecycleLoads_LoadExternalId");
+            entity.HasIndex(e => new { e.IsVerified, e.RecordedAtUtc }, "IX_RecycleLoads_IsVerified_RecordedAtUtc")
+                .IsDescending(false, true);
+
+            entity.Property(e => e.LoadExternalId).HasMaxLength(80);
+            entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.IsVerified).HasDefaultValue(false);
+            entity.Property(e => e.RecordedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(d => d.Driver).WithMany(p => p.RecycleLoadsAsDriver)
+                .HasForeignKey(d => d.DriverUserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_RecycleLoads_Driver");
+
+            entity.HasOne(d => d.RecordedByUser).WithMany(p => p.RecycleLoadsRecorded)
+                .HasForeignKey(d => d.RecordedByUserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_RecycleLoads_RecordedBy");
+
+            entity.HasOne(d => d.VerifiedByUser).WithMany()
+                .HasForeignKey(d => d.VerifiedByUserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_RecycleLoads_VerifiedBy");
+        });
+
+        modelBuilder.Entity<RecycleLoadDocument>(entity =>
+        {
+            entity.HasIndex(e => new { e.RecycleLoadId, e.DocumentType }, "UQ_RecycleLoadDocuments_Load_Type")
+                .IsUnique();
+
+            entity.Property(e => e.RelativePath).HasMaxLength(400);
+            entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(d => d.RecycleLoad).WithMany(p => p.Documents)
+                .HasForeignKey(d => d.RecycleLoadId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_RecycleLoadDocuments_Load");
+        });
+
+        modelBuilder.Entity<ConstructorActivityLog>(entity =>
+        {
+            entity.HasIndex(e => new { e.DriverUserId, e.RecordedAtUtc },
+                    "IX_ConstructorActivityLogs_DriverUserId_RecordedAtUtc")
+                .IsDescending(false, true);
+
+            entity.Property(e => e.RelativePath).HasMaxLength(400);
+            entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.RecordedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(d => d.Driver).WithMany(p => p.ConstructorActivitiesAsDriver)
+                .HasForeignKey(d => d.DriverUserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_ConstructorActivityLogs_Driver");
+
+            entity.HasOne(d => d.RecordedByUser).WithMany(p => p.ConstructorActivitiesRecorded)
+                .HasForeignKey(d => d.RecordedByUserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_ConstructorActivityLogs_RecordedBy");
         });
 
         modelBuilder.Entity<Zone>(entity =>

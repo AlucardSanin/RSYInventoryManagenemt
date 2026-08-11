@@ -1,0 +1,229 @@
+@page "/c/{Token:guid}"
+@layout PublicLayout
+@inject ConstructorActivityService Activities
+@inject MediaStorageService Media
+@inject UiBusyService Busy
+@inject ToastService Toasts
+
+<PageTitle>@_t.Title</PageTitle>
+
+@if (_loading)
+{
+    <div class="page-panel"><p class="mb-0 text-muted">@_t.Loading</p></div>
+}
+else if (_driver is null)
+{
+    <div class="alert alert-danger">@_t.InvalidLink</div>
+}
+else
+{
+    <div class="page-panel mb-3">
+        <h1 class="h4 mb-1">@_t.Hello, @_driver.DisplayName</h1>
+        <p class="form-hint mb-3">@_t.Lead</p>
+        <button type="button" class="btn btn-primary w-100" @onclick="OpenRegister">@_t.Register</button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-danger">@_error</div>
+    }
+
+    <div class="page-panel">
+        <h2 class="h6">@_t.Recent</h2>
+        @if (_recent.Count == 0)
+        {
+            <p class="mb-0 text-muted">@_t.Empty</p>
+        }
+        else
+        {
+            <div class="driver-card-list">
+                @foreach (var a in _recent)
+                {
+                    <div class="driver-card">
+                        <div class="driver-card__row">
+                            <strong>@YardTimeZone.ToEastern(a.RecordedAtUtc).ToString("yyyy-MM-dd HH:mm")</strong>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(a.RelativePath))
+                        {
+                            <img class="thumb-img mt-2" style="width:100%;max-height:160px;object-fit:cover" src="@a.RelativePath" alt="" />
+                        }
+                        @if (!string.IsNullOrWhiteSpace(a.Notes))
+                        {
+                            <div class="form-hint mt-1">@a.Notes</div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@if (_showRegister)
+{
+    <div class="modal-backdrop show"></div>
+    <div class="modal d-block" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5">@_t.Register</h2>
+                    <button type="button" class="btn-close" @onclick="() => _showRegister = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">@_t.Photo *</label>
+                        <InputFile class="form-control" accept="image/*" capture="environment" OnChange="OnPhoto" />
+                        <div class="form-hint">@(_photo?.Name ?? _t.CameraHint)</div>
+                    </div>
+                    <div>
+                        <label class="form-label">@_t.Notes</label>
+                        <textarea class="form-control" rows="2" @bind="_notes"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="() => _showRegister = false">@_t.Cancel</button>
+                    <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">@_t.Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid Token { get; set; }
+
+    private bool _loading = true;
+    private bool _busy;
+    private bool _showRegister;
+    private string? _error;
+    private User? _driver;
+    private List<ConstructorActivityLog> _recent = [];
+    private IBrowserFile? _photo;
+    private string _notes = "";
+    private UiText _t = UiText.Spanish;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var portal = await Activities.GetDriverPortalAsync(Token);
+            if (portal is null)
+            {
+                _driver = null;
+                return;
+            }
+
+            _driver = portal.Value.Driver;
+            _recent = portal.Value.Recent;
+            _t = UiText.For(_driver.PreferredLanguage);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void OpenRegister()
+    {
+        _photo = null;
+        _notes = "";
+        _showRegister = true;
+    }
+
+    private void OnPhoto(InputFileChangeEventArgs e) => _photo = e.File;
+
+    private async Task SaveAsync()
+    {
+        if (_photo is null)
+        {
+            Toasts.Error(_t.NeedPhoto);
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                var row = await Activities.CreateActivityFromDriverAsync(Token, _notes);
+                await using var stream = _photo.OpenReadStream(8 * 1024 * 1024);
+                var path = await Media.SaveAsync(stream, _photo.Name, "constructor", row.Id, "activity");
+                await Activities.SetImageAsync(row.Id, path, Token);
+                var portal = await Activities.GetDriverPortalAsync(Token);
+                _recent = portal?.Recent ?? [];
+            }, "…");
+
+            _showRegister = false;
+            Toasts.Success(_t.Saved);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Toasts.Error(ex.Message);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private sealed class UiText
+    {
+        public string Title { get; init; } = "";
+        public string Loading { get; init; } = "";
+        public string InvalidLink { get; init; } = "";
+        public string Hello { get; init; } = "";
+        public string Lead { get; init; } = "";
+        public string Register { get; init; } = "";
+        public string Recent { get; init; } = "";
+        public string Empty { get; init; } = "";
+        public string Photo { get; init; } = "";
+        public string Notes { get; init; } = "";
+        public string CameraHint { get; init; } = "";
+        public string Cancel { get; init; } = "";
+        public string Save { get; init; } = "";
+        public string NeedPhoto { get; init; } = "";
+        public string Saved { get; init; } = "";
+
+        public static UiText For(string? lang) =>
+            string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase) ? English : Spanish;
+
+        public static UiText Spanish { get; } = new()
+        {
+            Title = "Constructora",
+            Loading = "Cargando…",
+            InvalidLink = "Enlace inválido o inactivo.",
+            Hello = "Hola",
+            Lead = "Registra tu actividad del día con una foto.",
+            Register = "Registrar actividad",
+            Recent = "Actividad reciente",
+            Empty = "Aún no hay registros.",
+            Photo = "Foto",
+            Notes = "Notas (opcional)",
+            CameraHint = "Usa la cámara o la galería",
+            Cancel = "Cancelar",
+            Save = "Guardar",
+            NeedPhoto = "Sube una foto.",
+            Saved = "Actividad registrada."
+        };
+
+        public static UiText English { get; } = new()
+        {
+            Title = "Construction",
+            Loading = "Loading…",
+            InvalidLink = "Invalid or inactive link.",
+            Hello = "Hello",
+            Lead = "Log your activity with a photo.",
+            Register = "Log activity",
+            Recent = "Recent activity",
+            Empty = "No activity yet.",
+            Photo = "Photo",
+            Notes = "Notes (optional)",
+            CameraHint = "Use camera or gallery",
+            Cancel = "Cancel",
+            Save = "Save",
+            NeedPhoto = "Upload a photo.",
+            Saved = "Activity saved."
+        };
+    }
+}

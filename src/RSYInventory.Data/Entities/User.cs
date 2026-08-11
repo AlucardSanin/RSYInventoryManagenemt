@@ -39,5 +39,13 @@ public partial class User
 
     public virtual ICollection<ScheduledVehiclePickup> CreatedPickups { get; set; } = new List<ScheduledVehiclePickup>();
 
+    public virtual ICollection<RecycleLoad> RecycleLoadsAsDriver { get; set; } = new List<RecycleLoad>();
+
+    public virtual ICollection<RecycleLoad> RecycleLoadsRecorded { get; set; } = new List<RecycleLoad>();
+
+    public virtual ICollection<ConstructorActivityLog> ConstructorActivitiesAsDriver { get; set; } = new List<ConstructorActivityLog>();
+
+    public virtual ICollection<ConstructorActivityLog> ConstructorActivitiesRecorded { get; set; } = new List<ConstructorActivityLog>();
+
     public virtual ICollection<Role> Roles { get; set; } = new List<Role>();
 }

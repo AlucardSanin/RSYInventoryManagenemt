@@ -33,7 +33,7 @@
                 </NavLink>
             </div>
 
-            @if (CurrentUser.CanViewInventory || CurrentUser.CanEditInventory || CurrentUser.CanManagePickupSchedule)
+            @if (CurrentUser.CanViewInventory || CurrentUser.CanEditInventory || CurrentUser.CanManagePickupSchedule || CurrentUser.CanManageScrapLogistics)
             {
                 <p class="nav-section">Trabajo diario</p>
                 @if (CurrentUser.CanViewInventory || CurrentUser.CanEditInventory)
@@ -57,6 +57,19 @@
                     <div class="nav-item px-3">
                         <NavLink class="nav-link" href="vehicles/pickups">
                             <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Agenda de recolección
+                        </NavLink>
+                    </div>
+                }
+                @if (CurrentUser.CanManageScrapLogistics)
+                {
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="recycle/loads">
+                            <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Agenda de reciclaje
+                        </NavLink>
+                    </div>
+                    <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="constructor/activity">
+                            <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Actividad constructora
                         </NavLink>
                     </div>
                 }

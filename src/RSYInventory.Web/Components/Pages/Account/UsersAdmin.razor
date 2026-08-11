@@ -145,7 +145,7 @@ else
                             <td>
                                 @if (u.DriverAccessToken is Guid token)
                                 {
-                                    var link = Nav.ToAbsoluteUri($"d/{token}").ToString();
+                                    var link = Nav.ToAbsoluteUri(UserAdminService.PortalPathForRoles(u.Roles, token)).ToString();
                                     <div class="form-hint mono" style="max-width:14rem;word-break:break-all">@link</div>
                                     <button type="button" class="btn btn-sm btn-outline-secondary mt-1"
                                             @onclick="() => CopyLinkAsync(link)">Copiar</button>
@@ -197,7 +197,7 @@ else
     private bool _isActive = true;
 
     private bool DriverOnlySelected =>
-        _selectedRoles.Count == 1 && _selectedRoles.Contains(AppRole.Driver);
+        _selectedRoles.Count == 1 && UserAdminService.IsPortalDriverRole(_selectedRoles.First());
 
     protected override async Task OnInitializedAsync()
     {
@@ -351,7 +351,10 @@ else
         AppRole.ZoneManager => "Gestionar zonas",
         AppRole.VehicleAcquirer => "Adquirir vehículos",
         AppRole.SystemAdmin => "God / System Admin",
-        AppRole.Driver => "Chofer / Driver",
+        AppRole.Driver => "Chofer recolección",
+        AppRole.RecycleDriver => "Chofer reciclaje",
+        AppRole.ConstructorDriver => "Chofer constructora",
+        AppRole.ScrapLogisticsAdmin => "Admin reciclaje / constructora",
         _ => role.ToString()
     };
 
@@ -362,7 +365,10 @@ else
         AppRole.ZoneManager => "Crear y ajustar zonas, filas y paletas (incluye editar inventario).",
         AppRole.VehicleAcquirer => "Registrar/editar vehículos, fotos y recibos de compra; no asigna paleta.",
         AppRole.SystemAdmin => "Crear usuarios y asignar niveles de acceso.",
-        AppRole.Driver => "Solo ve su agenda de recolección con un enlace directo (sin contraseña).",
+        AppRole.Driver => "Agenda de recolección de vehículos por enlace (sin contraseña).",
+        AppRole.RecycleDriver => "Registra cargas de chatarra (BOL/NUCOR/SCALE) por enlace.",
+        AppRole.ConstructorDriver => "Registra actividad con foto por enlace.",
+        AppRole.ScrapLogisticsAdmin => "Administra agendas de reciclaje y constructora.",
         _ => string.Empty
     };
 }

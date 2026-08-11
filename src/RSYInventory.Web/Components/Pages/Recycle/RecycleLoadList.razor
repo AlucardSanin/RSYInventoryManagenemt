@@ -1,0 +1,515 @@
+@page "/recycle/loads"
+@inject RecycleLoadService Loads
+@inject MediaStorageService Media
+@inject ICurrentUserService CurrentUser
+@inject UiBusyService Busy
+@inject ToastService Toasts
+@inject NavigationManager Nav
+@inject IJSRuntime Js
+
+<PageTitle>Agenda de reciclaje</PageTitle>
+
+<PageHeader Title="Agenda de reciclaje"
+            Eyebrow="Chatarra"
+            Lead="Consulta cargas por chofer y fecha. Las cargadas por el chofer quedan pendientes de verificación hasta que revises las fotos BOL, NUCOR y SCALE.">
+    @if (CurrentUser.CanManageScrapLogistics)
+    {
+        <button type="button" class="btn btn-primary" @onclick="OpenCreate">Registrar carga</button>
+    }
+</PageHeader>
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+@if (!CurrentUser.CanManageScrapLogistics)
+{
+    <div class="alert alert-warning">No tienes permiso para la agenda de reciclaje.</div>
+}
+else if (_items is null)
+{
+    <div class="page-panel"><p class="mb-0 text-muted">Cargando…</p></div>
+}
+else
+{
+    <div class="page-panel mb-3">
+        <h2 class="page-panel__title">Enlaces de choferes de reciclaje</h2>
+        <p class="form-hint mb-3">Copia y envía el enlace al chofer. Entra sin contraseña para registrar cargas (BOL, NUCOR, SCALE).</p>
+        @if (_drivers.Count == 0)
+        {
+            <p class="mb-0 text-muted">No hay usuarios con rol Chofer reciclaje. Créalos en Usuarios.</p>
+        }
+        else
+        {
+            <div class="table-shell">
+                <table class="table table-sm table-hover align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Chofer</th>
+                            <th>Enlace</th>
+                            <th class="text-end">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var d in _drivers)
+                        {
+                            var link = d.DriverAccessToken is Guid token
+                                ? Nav.ToAbsoluteUri($"r/{token}").ToString()
+                                : null;
+                            <tr>
+                                <td><strong>@d.DisplayName</strong></td>
+                                <td>
+                                    @if (link is null)
+                                    {
+                                        <span class="text-muted">Sin enlace — regenera en Usuarios</span>
+                                    }
+                                    else
+                                    {
+                                        <div class="form-hint mono" style="max-width:28rem;word-break:break-all">@link</div>
+                                    }
+                                </td>
+                                <td class="text-end">
+                                    @if (link is not null)
+                                    {
+                                        <button type="button"
+                                                class="btn btn-sm btn-outline-secondary"
+                                                @onclick="() => CopyDriverLinkAsync(link)">Copiar enlace</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <div class="page-panel mb-3">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label">Chofer</label>
+                <select class="form-select" @bind="_filterDriverId">
+                    <option value="0">Todos</option>
+                    @foreach (var d in _drivers)
+                    {
+                        <option value="@d.Id">@d.DisplayName</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Desde</label>
+                <InputDate class="form-control" @bind-Value="_filterFrom" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Hasta</label>
+                <InputDate class="form-control" @bind-Value="_filterTo" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">ID carga</label>
+                <input class="form-control" @bind="_filterLoadId" placeholder="Ej. 12345" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Estado</label>
+                <select class="form-select" @bind="_filterVerified">
+                    <option value="">Todos</option>
+                    <option value="pending">Sin verificar</option>
+                    <option value="ok">Verificado</option>
+                </select>
+            </div>
+            <div class="col-md-1">
+                <button type="button" class="btn btn-outline-primary w-100" disabled="@Busy.IsBusy" @onclick="ReloadAsync">Filtrar</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="page-panel table-shell">
+        @if (_items.Count == 0)
+        {
+            <p class="mb-0 text-muted">Sin cargas para ese filtro.</p>
+        }
+        else
+        {
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>ID carga</th>
+                        <th>Chofer</th>
+                        <th>Fecha (ET)</th>
+                        <th>Docs</th>
+                        <th>Registró</th>
+                        <th>Estado</th>
+                        <th class="text-end">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var l in _items)
+                    {
+                        <tr>
+                            <td><code>@l.LoadExternalId</code></td>
+                            <td>@l.Driver.DisplayName</td>
+                            <td>@YardTimeZone.ToEastern(l.RecordedAtUtc).ToString("yyyy-MM-dd HH:mm")</td>
+                            <td>@l.Documents.Count / 3</td>
+                            <td>@l.RecordedByUser.DisplayName</td>
+                            <td>
+                                @if (l.IsVerified)
+                                {
+                                    <span class="badge-status badge-status--ok">Verificado</span>
+                                }
+                                else
+                                {
+                                    <span class="badge-status badge-status--warn">Pendiente por verificación</span>
+                                }
+                            </td>
+                            <td class="text-end">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenDetail(l)">Ver</button>
+                                @if (!l.IsVerified)
+                                {
+                                    <button type="button" class="btn btn-sm btn-success" disabled="@Busy.IsBusy"
+                                            @onclick="() => VerifyAsync(l.Id, true)">Verificar</button>
+                                }
+                                else
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-warning" disabled="@Busy.IsBusy"
+                                            @onclick="() => VerifyAsync(l.Id, false)">Quitar verif.</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+}
+
+@if (_showCreate)
+{
+    <div class="modal-backdrop show"></div>
+    <div class="modal d-block" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5">Registrar carga</h2>
+                    <button type="button" class="btn-close" @onclick="CloseCreate"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">ID de la carga *</label>
+                            <input class="form-control" @bind="_createLoadId" placeholder="ID en los papeles" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Chofer *</label>
+                            <select class="form-select" @bind="_createDriverId">
+                                <option value="0">Seleccionar…</option>
+                                @foreach (var d in _drivers)
+                                {
+                                    <option value="@d.Id">@d.DisplayName</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Notas</label>
+                            <textarea class="form-control" rows="2" @bind="_createNotes"></textarea>
+                        </div>
+                        @foreach (var doc in _docSlots)
+                        {
+                            <div class="col-md-4">
+                                <label class="form-label">@doc.Label *</label>
+                                <InputFile class="form-control"
+                                           accept="image/*" capture="environment"
+                                           OnChange="e => OnCreateDocSelected(doc.Type, e)" />
+                                <div class="form-hint mt-1">@(doc.File?.Name ?? "Cámara o galería")</div>
+                            </div>
+                        }
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CloseCreate">Cancelar</button>
+                    <button type="button" class="btn btn-primary" disabled="@Busy.IsBusy" @onclick="SaveCreateAsync">Guardar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_detail is not null)
+{
+    <div class="modal-backdrop show"></div>
+    <div class="modal d-block" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5">Carga @_detail.LoadExternalId</h2>
+                    <button type="button" class="btn-close" @onclick="() => _detail = null"></button>
+                </div>
+                <div class="modal-body">
+                    <dl class="row">
+                        <dt class="col-4">Chofer</dt><dd class="col-8">@_detail.Driver.DisplayName</dd>
+                        <dt class="col-4">Fecha</dt><dd class="col-8">@YardTimeZone.ToEastern(_detail.RecordedAtUtc).ToString("yyyy-MM-dd HH:mm") ET</dd>
+                        <dt class="col-4">Registró</dt><dd class="col-8">@_detail.RecordedByUser.DisplayName</dd>
+                        <dt class="col-4">Estado</dt>
+                        <dd class="col-8">
+                            @(_detail.IsVerified ? "Verificado" : "Pendiente por verificación")
+                        </dd>
+                        <dt class="col-4">Notas</dt><dd class="col-8">@(_detail.Notes ?? "—")</dd>
+                    </dl>
+                    <div class="row g-3">
+                        @foreach (var type in new[] { RecycleDocumentType.Bol, RecycleDocumentType.Nucor, RecycleDocumentType.Scale })
+                        {
+                            var doc = _detail.Documents.FirstOrDefault(d => d.DocumentType == (byte)type);
+                            <div class="col-md-4">
+                                <p class="fw-semibold mb-1">@DocLabel(type)</p>
+                                @if (doc is not null)
+                                {
+                                    <a href="@doc.RelativePath" target="_blank" rel="noopener">
+                                        <img class="thumb-img" style="width:100%;max-height:180px;object-fit:cover" src="@doc.RelativePath" alt="@DocLabel(type)" />
+                                    </a>
+                                }
+                                else
+                                {
+                                    <p class="text-muted">Sin archivo</p>
+                                }
+                                <InputFile class="form-control form-control-sm mt-2"
+                                           accept="image/*" capture="environment"
+                                           OnChange="e => ReplaceDocAsync(type, e)" />
+                            </div>
+                        }
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-danger" disabled="@Busy.IsBusy" @onclick="DeleteDetailAsync">Eliminar</button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="() => _detail = null">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ImageViewer @ref="_viewer" />
+
+@code {
+    private List<RecycleLoad>? _items;
+    private List<User> _drivers = [];
+    private string? _error;
+    private string _filterDriverId = "0";
+    private string _filterLoadId = "";
+    private string _filterVerified = "";
+    private DateTime? _filterFrom;
+    private DateTime? _filterTo;
+    private RecycleLoad? _detail;
+    private ImageViewer? _viewer;
+
+    private bool _showCreate;
+    private string _createLoadId = "";
+    private string _createDriverId = "0";
+    private string _createNotes = "";
+    private readonly List<DocSlot> _docSlots =
+    [
+        new(RecycleDocumentType.Bol, "BOL"),
+        new(RecycleDocumentType.Nucor, "NUCOR"),
+        new(RecycleDocumentType.Scale, "SCALE")
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CurrentUser.IsAuthenticated)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        if (!CurrentUser.CanManageScrapLogistics) return;
+
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                _drivers = await Loads.GetRecycleDriversAsync();
+                await LoadItemsAsync();
+            }, "Cargando agenda de reciclaje…");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message + " — ¿Ejecutaste 018_SpecialDrivers.sql?";
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _error = null;
+        try
+        {
+            await Busy.RunAsync(LoadItemsAsync, "Filtrando…");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Toasts.Error(ex.Message);
+        }
+    }
+
+    private async Task LoadItemsAsync()
+    {
+        int? driverId = int.TryParse(_filterDriverId, out var id) && id > 0 ? id : null;
+        DateOnly? from = _filterFrom is null ? null : DateOnly.FromDateTime(_filterFrom.Value);
+        DateOnly? to = _filterTo is null ? null : DateOnly.FromDateTime(_filterTo.Value);
+        bool? verified = _filterVerified switch
+        {
+            "pending" => false,
+            "ok" => true,
+            _ => null
+        };
+        _items = await Loads.SearchAsync(driverId, from, to, _filterLoadId, verified);
+    }
+
+    private void OpenCreate()
+    {
+        _createLoadId = "";
+        _createDriverId = "0";
+        _createNotes = "";
+        foreach (var s in _docSlots) s.File = null;
+        _showCreate = true;
+    }
+
+    private async Task CopyDriverLinkAsync(string link)
+    {
+        if (string.IsNullOrWhiteSpace(link)) return;
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", link);
+            Toasts.Success("Enlace del chofer copiado.");
+        }
+        catch
+        {
+            Toasts.Error("No se pudo copiar. Selecciona el enlace y cópialo manualmente.");
+        }
+    }
+
+    private void CloseCreate() => _showCreate = false;
+
+    private void OnCreateDocSelected(RecycleDocumentType type, InputFileChangeEventArgs e)
+    {
+        var slot = _docSlots.First(s => s.Type == type);
+        slot.File = e.File;
+    }
+
+    private async Task SaveCreateAsync()
+    {
+        if (!int.TryParse(_createDriverId, out var driverId) || driverId <= 0)
+        {
+            Toasts.Error("Selecciona un chofer.");
+            return;
+        }
+
+        if (_docSlots.Any(s => s.File is null))
+        {
+            Toasts.Error("Sube BOL, NUCOR y SCALE.");
+            return;
+        }
+
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                var load = await Loads.CreateLoadAsync(_createLoadId, driverId, _createNotes, recordedByStaff: true);
+                foreach (var slot in _docSlots)
+                {
+                    await using var stream = slot.File!.OpenReadStream(8 * 1024 * 1024);
+                    var path = await Media.SaveAsync(stream, slot.File.Name, "recycle", load.Id, DocLabel(slot.Type));
+                    await Loads.AttachDocumentAsync(load.Id, slot.Type, path);
+                }
+
+                await Loads.EnsureCompleteDocumentsAsync(load.Id);
+                await Loads.SetVerifiedAsync(load.Id, true);
+                await LoadItemsAsync();
+            }, "Guardando carga…");
+
+            _showCreate = false;
+            Toasts.Success("Carga registrada y verificada.");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+            _error = ex.Message;
+        }
+    }
+
+    private void OpenDetail(RecycleLoad l) => _detail = l;
+
+    private async Task VerifyAsync(int id, bool verified)
+    {
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                await Loads.SetVerifiedAsync(id, verified);
+                await LoadItemsAsync();
+                if (_detail?.Id == id)
+                    _detail = await Loads.GetByIdAsync(id);
+            }, "Actualizando…");
+            Toasts.Success(verified ? "Marcada como verificada." : "Verificación quitada.");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+        }
+    }
+
+    private async Task ReplaceDocAsync(RecycleDocumentType type, InputFileChangeEventArgs e)
+    {
+        if (_detail is null) return;
+        var file = e.File;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                await using var stream = file.OpenReadStream(8 * 1024 * 1024);
+                var path = await Media.SaveAsync(stream, file.Name, "recycle", _detail.Id, DocLabel(type));
+                await Loads.ReplaceDocumentAsync(_detail.Id, type, path);
+                _detail = await Loads.GetByIdAsync(_detail.Id);
+                await LoadItemsAsync();
+            }, "Reemplazando documento…");
+            Toasts.Success($"{DocLabel(type)} actualizado. Queda pendiente de verificación.");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+        }
+    }
+
+    private async Task DeleteDetailAsync()
+    {
+        if (_detail is null) return;
+        try
+        {
+            var id = _detail.Id;
+            await Busy.RunAsync(async () =>
+            {
+                await Loads.DeleteAsync(id);
+                await LoadItemsAsync();
+            }, "Eliminando…");
+            _detail = null;
+            Toasts.Success("Carga eliminada.");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+        }
+    }
+
+    private static string DocLabel(RecycleDocumentType t) => t switch
+    {
+        RecycleDocumentType.Bol => "BOL",
+        RecycleDocumentType.Nucor => "NUCOR",
+        RecycleDocumentType.Scale => "SCALE",
+        _ => t.ToString()
+    };
+
+    private sealed class DocSlot(RecycleDocumentType type, string label)
+    {
+        public RecycleDocumentType Type { get; } = type;
+        public string Label { get; } = label;
+        public IBrowserFile? File { get; set; }
+    }
+}

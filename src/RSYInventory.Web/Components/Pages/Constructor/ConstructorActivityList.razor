@@ -1,0 +1,339 @@
+@page "/constructor/activity"
+@inject ConstructorActivityService Activities
+@inject MediaStorageService Media
+@inject ICurrentUserService CurrentUser
+@inject UiBusyService Busy
+@inject ToastService Toasts
+@inject NavigationManager Nav
+@inject IJSRuntime Js
+
+<PageTitle>Actividad constructora</PageTitle>
+
+<PageHeader Title="Actividad de constructora"
+            Eyebrow="Choferes especiales"
+            Lead="Registro de actividad con foto. Filtra por chofer y fecha; también puedes cargar actividad en nombre del chofer.">
+    @if (CurrentUser.CanManageScrapLogistics)
+    {
+        <button type="button" class="btn btn-primary" @onclick="OpenCreate">Registrar actividad</button>
+    }
+</PageHeader>
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+@if (!CurrentUser.CanManageScrapLogistics)
+{
+    <div class="alert alert-warning">No tienes permiso para esta agenda.</div>
+}
+else if (_items is null)
+{
+    <div class="page-panel"><p class="mb-0 text-muted">Cargando…</p></div>
+}
+else
+{
+    <div class="page-panel mb-3">
+        <h2 class="page-panel__title">Enlaces de choferes de constructora</h2>
+        <p class="form-hint mb-3">Copia y envía el enlace al chofer. Entra sin contraseña para registrar actividad con una foto.</p>
+        @if (_drivers.Count == 0)
+        {
+            <p class="mb-0 text-muted">No hay usuarios con rol Chofer constructora. Créalos en Usuarios.</p>
+        }
+        else
+        {
+            <div class="table-shell">
+                <table class="table table-sm table-hover align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Chofer</th>
+                            <th>Enlace</th>
+                            <th class="text-end">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var d in _drivers)
+                        {
+                            var link = d.DriverAccessToken is Guid token
+                                ? Nav.ToAbsoluteUri($"c/{token}").ToString()
+                                : null;
+                            <tr>
+                                <td><strong>@d.DisplayName</strong></td>
+                                <td>
+                                    @if (link is null)
+                                    {
+                                        <span class="text-muted">Sin enlace — regenera en Usuarios</span>
+                                    }
+                                    else
+                                    {
+                                        <div class="form-hint mono" style="max-width:28rem;word-break:break-all">@link</div>
+                                    }
+                                </td>
+                                <td class="text-end">
+                                    @if (link is not null)
+                                    {
+                                        <button type="button"
+                                                class="btn btn-sm btn-outline-secondary"
+                                                @onclick="() => CopyDriverLinkAsync(link)">Copiar enlace</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <div class="page-panel mb-3">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label">Chofer</label>
+                <select class="form-select" @bind="_filterDriverId">
+                    <option value="0">Todos</option>
+                    @foreach (var d in _drivers)
+                    {
+                        <option value="@d.Id">@d.DisplayName</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Desde</label>
+                <InputDate class="form-control" @bind-Value="_filterFrom" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Hasta</label>
+                <InputDate class="form-control" @bind-Value="_filterTo" />
+            </div>
+            <div class="col-md-2">
+                <button type="button" class="btn btn-outline-primary w-100" disabled="@Busy.IsBusy" @onclick="ReloadAsync">Filtrar</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="page-panel table-shell">
+        @if (_items.Count == 0)
+        {
+            <p class="mb-0 text-muted">Sin actividad para ese filtro.</p>
+        }
+        else
+        {
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>Chofer</th>
+                        <th>Fecha (ET)</th>
+                        <th>Registró</th>
+                        <th>Notas</th>
+                        <th class="text-end">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var a in _items)
+                    {
+                        <tr>
+                            <td style="width:4rem">
+                                @if (!string.IsNullOrWhiteSpace(a.RelativePath))
+                                {
+                                    <button type="button" class="thumb-btn" @onclick="() => OpenViewer(a.RelativePath)">
+                                        <img class="thumb-img" src="@a.RelativePath" alt="" loading="lazy" />
+                                    </button>
+                                }
+                            </td>
+                            <td>@a.Driver.DisplayName</td>
+                            <td>@YardTimeZone.ToEastern(a.RecordedAtUtc).ToString("yyyy-MM-dd HH:mm")</td>
+                            <td>@a.RecordedByUser.DisplayName</td>
+                            <td>@(a.Notes ?? "—")</td>
+                            <td class="text-end">
+                                <button type="button" class="btn btn-sm btn-outline-danger" disabled="@Busy.IsBusy"
+                                        @onclick="() => DeleteAsync(a.Id)">Eliminar</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+}
+
+@if (_showCreate)
+{
+    <div class="modal-backdrop show"></div>
+    <div class="modal d-block" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5">Registrar actividad</h2>
+                    <button type="button" class="btn-close" @onclick="() => _showCreate = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Chofer *</label>
+                        <select class="form-select" @bind="_createDriverId">
+                            <option value="0">Seleccionar…</option>
+                            @foreach (var d in _drivers)
+                            {
+                                <option value="@d.Id">@d.DisplayName</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Foto *</label>
+                        <InputFile class="form-control" accept="image/*" capture="environment" OnChange="OnPhotoSelected" />
+                        <div class="form-hint mt-1">@(_photo?.Name ?? "Cámara o galería")</div>
+                    </div>
+                    <div>
+                        <label class="form-label">Notas</label>
+                        <textarea class="form-control" rows="2" @bind="_createNotes"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="() => _showCreate = false">Cancelar</button>
+                    <button type="button" class="btn btn-primary" disabled="@Busy.IsBusy" @onclick="SaveCreateAsync">Guardar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<ImageViewer @ref="_viewer" />
+
+@code {
+    private List<ConstructorActivityLog>? _items;
+    private List<User> _drivers = [];
+    private string? _error;
+    private string _filterDriverId = "0";
+    private DateTime? _filterFrom;
+    private DateTime? _filterTo;
+    private bool _showCreate;
+    private string _createDriverId = "0";
+    private string _createNotes = "";
+    private IBrowserFile? _photo;
+    private ImageViewer? _viewer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CurrentUser.IsAuthenticated)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        if (!CurrentUser.CanManageScrapLogistics) return;
+
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                _drivers = await Activities.GetConstructorDriversAsync();
+                await LoadItemsAsync();
+            }, "Cargando actividad…");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message + " — ¿Ejecutaste 018_SpecialDrivers.sql?";
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            await Busy.RunAsync(LoadItemsAsync, "Filtrando…");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+            _error = ex.Message;
+        }
+    }
+
+    private async Task LoadItemsAsync()
+    {
+        int? driverId = int.TryParse(_filterDriverId, out var id) && id > 0 ? id : null;
+        DateOnly? from = _filterFrom is null ? null : DateOnly.FromDateTime(_filterFrom.Value);
+        DateOnly? to = _filterTo is null ? null : DateOnly.FromDateTime(_filterTo.Value);
+        _items = await Activities.SearchAsync(driverId, from, to);
+    }
+
+    private void OpenCreate()
+    {
+        _createDriverId = "0";
+        _createNotes = "";
+        _photo = null;
+        _showCreate = true;
+    }
+
+    private async Task CopyDriverLinkAsync(string link)
+    {
+        if (string.IsNullOrWhiteSpace(link)) return;
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", link);
+            Toasts.Success("Enlace del chofer copiado.");
+        }
+        catch
+        {
+            Toasts.Error("No se pudo copiar. Selecciona el enlace y cópialo manualmente.");
+        }
+    }
+
+    private void OnPhotoSelected(InputFileChangeEventArgs e) => _photo = e.File;
+
+    private async Task SaveCreateAsync()
+    {
+        if (!int.TryParse(_createDriverId, out var driverId) || driverId <= 0)
+        {
+            Toasts.Error("Selecciona un chofer.");
+            return;
+        }
+
+        if (_photo is null)
+        {
+            Toasts.Error("Sube una foto.");
+            return;
+        }
+
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                var row = await Activities.CreateActivityAsync(driverId, _createNotes, recordedByStaff: true);
+                await using var stream = _photo.OpenReadStream(8 * 1024 * 1024);
+                var path = await Media.SaveAsync(stream, _photo.Name, "constructor", row.Id, "activity");
+                await Activities.SetImageAsync(row.Id, path);
+                await LoadItemsAsync();
+            }, "Guardando…");
+            _showCreate = false;
+            Toasts.Success("Actividad registrada.");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+        }
+    }
+
+    private async Task DeleteAsync(int id)
+    {
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                await Activities.DeleteAsync(id);
+                await LoadItemsAsync();
+            }, "Eliminando…");
+            Toasts.Success("Eliminado.");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+        }
+    }
+
+    private async Task OpenViewer(string path)
+    {
+        if (_viewer is null) return;
+        await _viewer.OpenAsync([path]);
+    }
+}

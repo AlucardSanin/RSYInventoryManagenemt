@@ -21,5 +21,14 @@ public enum AppRole
     SystemAdmin = 5,
 
     /// <summary>Driver / chofer: passwordless pickup agenda via personal link only.</summary>
-    Driver = 6
+    Driver = 6,
+
+    /// <summary>Recycle / scrap driver: registers loads with BOL, NUCOR, SCALE photos via personal link.</summary>
+    RecycleDriver = 7,
+
+    /// <summary>Constructor site driver: logs activity with a single photo via personal link.</summary>
+    ConstructorDriver = 8,
+
+    /// <summary>Manages recycle load agenda and constructor activity logs.</summary>
+    ScrapLogisticsAdmin = 9
 }
