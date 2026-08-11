@@ -42,6 +42,10 @@ public partial class YardInventoryDbContext : DbContext
 
     public virtual DbSet<RecycleLoadDocument> RecycleLoadDocuments { get; set; }
 
+    public virtual DbSet<RecycleBillToCompany> RecycleBillToCompanies { get; set; }
+
+    public virtual DbSet<RecycleWeeklyInvoice> RecycleWeeklyInvoices { get; set; }
+
     public virtual DbSet<ConstructorActivityLog> ConstructorActivityLogs { get; set; }
 
     public virtual DbSet<Zone> Zones { get; set; }
@@ -344,15 +348,26 @@ public partial class YardInventoryDbContext : DbContext
                 .IsDescending(false, true);
 
             entity.Property(e => e.LoadExternalId).HasMaxLength(80);
+            entity.Property(e => e.TruckNumber).HasMaxLength(40);
+            entity.Property(e => e.RateUsd).HasPrecision(12, 2).HasDefaultValue(575m);
             entity.Property(e => e.Notes).HasMaxLength(1000);
             entity.Property(e => e.IsVerified).HasDefaultValue(false);
             entity.Property(e => e.RecordedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
             entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
 
+            entity.HasIndex(e => e.LoadDate, "IX_RecycleLoads_LoadDate").IsDescending();
+            entity.HasIndex(e => new { e.BillToCompanyId, e.LoadDate }, "IX_RecycleLoads_BillToCompanyId_LoadDate")
+                .IsDescending(false, true);
+
             entity.HasOne(d => d.Driver).WithMany(p => p.RecycleLoadsAsDriver)
                 .HasForeignKey(d => d.DriverUserId)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_RecycleLoads_Driver");
+
+            entity.HasOne(d => d.BillToCompany).WithMany()
+                .HasForeignKey(d => d.BillToCompanyId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_RecycleLoads_BillTo");
 
             entity.HasOne(d => d.RecordedByUser).WithMany(p => p.RecycleLoadsRecorded)
                 .HasForeignKey(d => d.RecordedByUserId)
@@ -363,6 +378,37 @@ public partial class YardInventoryDbContext : DbContext
                 .HasForeignKey(d => d.VerifiedByUserId)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_RecycleLoads_VerifiedBy");
+        });
+
+        modelBuilder.Entity<RecycleBillToCompany>(entity =>
+        {
+            entity.Property(e => e.Alias).HasMaxLength(80);
+            entity.Property(e => e.CompanyName).HasMaxLength(200);
+            entity.Property(e => e.AddressLine).HasMaxLength(300);
+            entity.Property(e => e.ContactLine).HasMaxLength(300);
+            entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+        });
+
+        modelBuilder.Entity<RecycleWeeklyInvoice>(entity =>
+        {
+            entity.HasIndex(e => e.InvoiceNumber, "UQ_RecycleWeeklyInvoices_InvoiceNumber").IsUnique();
+            entity.HasIndex(e => new { e.WeekStartDate, e.BillToCompanyId }, "UQ_RecycleWeeklyInvoices_Week_BillTo").IsUnique();
+            entity.HasIndex(e => e.WeekStartDate, "IX_RecycleWeeklyInvoices_WeekStartDate").IsDescending();
+
+            entity.Property(e => e.PdfRelativePath).HasMaxLength(400);
+            entity.Property(e => e.TotalAmountUsd).HasPrecision(12, 2);
+            entity.Property(e => e.GeneratedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(d => d.BillToCompany).WithMany()
+                .HasForeignKey(d => d.BillToCompanyId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_RecycleWeeklyInvoices_BillTo");
+
+            entity.HasOne(d => d.GeneratedByUser).WithMany()
+                .HasForeignKey(d => d.GeneratedByUserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_RecycleWeeklyInvoices_GeneratedBy");
         });
 
         modelBuilder.Entity<RecycleLoadDocument>(entity =>

@@ -1,5 +1,7 @@
 @page "/recycle/loads"
 @inject RecycleLoadService Loads
+@inject RecycleInvoiceService Invoices
+@inject RecycleWeeklyInvoicePdfService InvoicePdf
 @inject MediaStorageService Media
 @inject ICurrentUserService CurrentUser
 @inject UiBusyService Busy
@@ -11,10 +13,10 @@
 
 <PageHeader Title="Agenda de reciclaje"
             Eyebrow="Chatarra"
-            Lead="Consulta cargas por chofer y fecha. Las cargadas por el chofer quedan pendientes de verificación hasta que revises las fotos BOL, NUCOR y SCALE.">
+            Lead="Consulta cargas por chofer y fecha. Al registrar, elige la compañía a la que se vendió. El invoice semanal solo imprime las cargas de esa compañía.">
     @if (CurrentUser.CanManageScrapLogistics)
     {
-        <button type="button" class="btn btn-primary" @onclick="OpenCreate">Registrar carga</button>
+        <button type="button" class="btn btn-primary" @onclick="OpenCreateAsync">Registrar carga</button>
     }
 </PageHeader>
 
@@ -86,6 +88,140 @@ else
     </div>
 
     <div class="page-panel mb-3">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="page-panel__title mb-0">Compañías BILL TO</h2>
+            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="OpenBillToCreate">Nueva</button>
+        </div>
+        @if (_billToCompanies.Count == 0)
+        {
+            <p class="mb-0 text-muted">No hay compañías. Crea una para generar invoices.</p>
+        }
+        else
+        {
+            <div class="table-shell">
+                <table class="table table-sm table-hover align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Alias</th>
+                            <th>Nombre</th>
+                            <th>Dirección</th>
+                            <th>Activa</th>
+                            <th class="text-end">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var c in _billToCompanies)
+                        {
+                            <tr>
+                                <td><strong>@c.Alias</strong></td>
+                                <td>@c.CompanyName</td>
+                                <td>@c.AddressLine</td>
+                                <td>@(c.IsActive ? "Sí" : "No")</td>
+                                <td class="text-end">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary"
+                                            @onclick="() => OpenBillToEdit(c)">Editar</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <div class="page-panel mb-3">
+        <h2 class="page-panel__title">Invoice semanal</h2>
+        <p class="form-hint mb-2">Elige la compañía para imprimir solo las cargas de esa semana registradas para ella.</p>
+        <div class="row g-2 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label">Compañía (filtro)</label>
+                <select class="form-select" @bind="_invoiceBillToId">
+                    <option value="0">Seleccionar…</option>
+                    @foreach (var c in _billToCompanies.Where(x => x.IsActive))
+                    {
+                        <option value="@c.Id">@c.Alias — @c.CompanyName</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Fecha (semana)</label>
+                <InputDate class="form-control" @bind-Value="_invoicePickDate" @bind-Value:after="SnapInvoiceWeek" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Semana seleccionada</label>
+                <div class="form-control-plaintext">
+                    @if (_invoiceMonday is not null && _invoiceFriday is not null)
+                    {
+                        <span>@_invoiceMonday.Value.ToString("yyyy-MM-dd") → @_invoiceFriday.Value.ToString("yyyy-MM-dd")</span>
+                    }
+                    else
+                    {
+                        <span class="text-muted">—</span>
+                    }
+                </div>
+            </div>
+            <div class="col-md-3 d-flex gap-2 flex-wrap">
+                <button type="button" class="btn btn-outline-secondary" @onclick="SelectLastWeek">Última semana</button>
+                <button type="button" class="btn btn-primary" disabled="@Busy.IsBusy" @onclick="GenerateInvoiceAsync">Generar PDF</button>
+            </div>
+        </div>
+        @if (_needReplacePassword)
+        {
+            <div class="row g-2 align-items-end mt-2">
+                <div class="col-md-4">
+                    <label class="form-label">Contraseña para reemplazar invoice</label>
+                    <input class="form-control" type="password" @bind="_replacePassword" autocomplete="current-password" />
+                </div>
+                <div class="col-md-4">
+                    <div class="form-hint">Ya existe un invoice para esa semana y compañía. Confirma con tu contraseña y vuelve a generar.</div>
+                </div>
+            </div>
+        }
+    </div>
+
+    <div class="page-panel mb-3">
+        <h2 class="page-panel__title">Invoices guardados</h2>
+        @if (_invoices.Count == 0)
+        {
+            <p class="mb-0 text-muted">Aún no hay invoices generados.</p>
+        }
+        else
+        {
+            <div class="table-shell">
+                <table class="table table-sm table-hover align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Semana</th>
+                            <th>BILL TO</th>
+                            <th>Total</th>
+                            <th>Generado</th>
+                            <th class="text-end">PDF</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var inv in _invoices)
+                        {
+                            <tr>
+                                <td><code>@inv.InvoiceNumber</code></td>
+                                <td>@inv.WeekStartDate.ToString("yyyy-MM-dd") → @inv.WeekEndDate.ToString("yyyy-MM-dd")</td>
+                                <td>@(inv.BillToCompany?.Alias ?? "—")</td>
+                                <td>@UsdMoney.Format(inv.TotalAmountUsd)</td>
+                                <td>@YardTimeZone.ToEastern(inv.GeneratedAtUtc).ToString("yyyy-MM-dd HH:mm")</td>
+                                <td class="text-end">
+                                    <a class="btn btn-sm btn-outline-secondary" href="@inv.PdfRelativePath" target="_blank" rel="noopener">Ver PDF</a>
+                                    <button type="button" class="btn btn-sm btn-outline-primary"
+                                            @onclick="() => DownloadInvoiceAsync(inv)">Descargar</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <div class="page-panel mb-3">
         <div class="row g-2 align-items-end">
             <div class="col-md-3">
                 <label class="form-label">Chofer</label>
@@ -134,8 +270,12 @@ else
                 <thead>
                     <tr>
                         <th>ID carga</th>
+                        <th>Compañía</th>
                         <th>Chofer</th>
-                        <th>Fecha (ET)</th>
+                        <th>Fecha</th>
+                        <th>Camión</th>
+                        <th>Precio</th>
+                        <th>Registrado (ET)</th>
                         <th>Docs</th>
                         <th>Registró</th>
                         <th>Estado</th>
@@ -147,7 +287,11 @@ else
                     {
                         <tr>
                             <td><code>@l.LoadExternalId</code></td>
+                            <td>@(l.BillToCompany?.Alias ?? "—")</td>
                             <td>@l.Driver.DisplayName</td>
+                            <td>@l.LoadDate.ToString("yyyy-MM-dd")</td>
+                            <td>@(l.TruckNumber ?? "—")</td>
+                            <td>@UsdMoney.Format(l.RateUsd)</td>
                             <td>@YardTimeZone.ToEastern(l.RecordedAtUtc).ToString("yyyy-MM-dd HH:mm")</td>
                             <td>@l.Documents.Count / 3</td>
                             <td>@l.RecordedByUser.DisplayName</td>
@@ -208,6 +352,28 @@ else
                                 }
                             </select>
                         </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Compañía (vendido a) *</label>
+                            <select class="form-select" @bind="_createBillToId">
+                                <option value="0">Seleccionar…</option>
+                                @foreach (var c in _billToCompanies.Where(x => x.IsActive))
+                                {
+                                    <option value="@c.Id">@c.Alias — @c.CompanyName</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Precio (USD) *</label>
+                            <input class="form-control" type="number" step="0.01" min="0.01" @bind="_createRate" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Camión</label>
+                            <input class="form-control" @bind="_createTruck" placeholder="Nº camión" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Fecha de carga *</label>
+                            <InputDate class="form-control" @bind-Value="_createLoadDate" />
+                        </div>
                         <div class="col-12">
                             <label class="form-label">Notas</label>
                             <textarea class="form-control" rows="2" @bind="_createNotes"></textarea>
@@ -244,15 +410,55 @@ else
                     <button type="button" class="btn-close" @onclick="() => _detail = null"></button>
                 </div>
                 <div class="modal-body">
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">ID de la carga</label>
+                            <input class="form-control" @bind="_editLoadId" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Chofer</label>
+                            <select class="form-select" @bind="_editDriverId">
+                                @foreach (var d in _drivers)
+                                {
+                                    <option value="@d.Id">@d.DisplayName</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Compañía (vendido a)</label>
+                            <select class="form-select" @bind="_editBillToId">
+                                @foreach (var c in BillToOptionsForEdit())
+                                {
+                                    <option value="@c.Id">@c.Alias — @c.CompanyName</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Precio (USD)</label>
+                            <input class="form-control" type="number" step="0.01" min="0.01" @bind="_editRate" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Camión</label>
+                            <input class="form-control" @bind="_editTruck" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Fecha de carga</label>
+                            <InputDate class="form-control" @bind-Value="_editLoadDate" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Notas</label>
+                            <textarea class="form-control" rows="2" @bind="_editNotes"></textarea>
+                        </div>
+                    </div>
                     <dl class="row">
-                        <dt class="col-4">Chofer</dt><dd class="col-8">@_detail.Driver.DisplayName</dd>
-                        <dt class="col-4">Fecha</dt><dd class="col-8">@YardTimeZone.ToEastern(_detail.RecordedAtUtc).ToString("yyyy-MM-dd HH:mm") ET</dd>
-                        <dt class="col-4">Registró</dt><dd class="col-8">@_detail.RecordedByUser.DisplayName</dd>
+                        <dt class="col-4">Registrado</dt>
+                        <dd class="col-8">@YardTimeZone.ToEastern(_detail.RecordedAtUtc).ToString("yyyy-MM-dd HH:mm") ET</dd>
+                        <dt class="col-4">Registró</dt>
+                        <dd class="col-8">@_detail.RecordedByUser.DisplayName</dd>
                         <dt class="col-4">Estado</dt>
                         <dd class="col-8">
                             @(_detail.IsVerified ? "Verificado" : "Pendiente por verificación")
                         </dd>
-                        <dt class="col-4">Notas</dt><dd class="col-8">@(_detail.Notes ?? "—")</dd>
                     </dl>
                     <div class="row g-3">
                         @foreach (var type in new[] { RecycleDocumentType.Bol, RecycleDocumentType.Nucor, RecycleDocumentType.Scale })
@@ -279,7 +485,49 @@ else
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline-danger" disabled="@Busy.IsBusy" @onclick="DeleteDetailAsync">Eliminar</button>
+                    <button type="button" class="btn btn-primary" disabled="@Busy.IsBusy" @onclick="SaveDetailMetaAsync">Guardar datos</button>
                     <button type="button" class="btn btn-outline-secondary" @onclick="() => _detail = null">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_showBillTo)
+{
+    <div class="modal-backdrop show"></div>
+    <div class="modal d-block" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5">@(_billToEditId is null ? "Nueva compañía BILL TO" : "Editar compañía BILL TO")</h2>
+                    <button type="button" class="btn-close" @onclick="() => _showBillTo = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Alias *</label>
+                        <input class="form-control" @bind="_billToAlias" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Nombre *</label>
+                        <input class="form-control" @bind="_billToName" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Dirección *</label>
+                        <textarea class="form-control" rows="2" @bind="_billToAddress"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Contacto</label>
+                        <input class="form-control" @bind="_billToContact" />
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="billToActive" @bind="_billToActive" />
+                        <label class="form-check-label" for="billToActive">Activa</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="() => _showBillTo = false">Cancelar</button>
+                    <button type="button" class="btn btn-primary" disabled="@Busy.IsBusy" @onclick="SaveBillToAsync">Guardar</button>
                 </div>
             </div>
         </div>
@@ -291,6 +539,8 @@ else
 @code {
     private List<RecycleLoad>? _items;
     private List<User> _drivers = [];
+    private List<RecycleBillToCompany> _billToCompanies = [];
+    private List<RecycleWeeklyInvoice> _invoices = [];
     private string? _error;
     private string _filterDriverId = "0";
     private string _filterLoadId = "";
@@ -303,13 +553,40 @@ else
     private bool _showCreate;
     private string _createLoadId = "";
     private string _createDriverId = "0";
+    private string _createBillToId = "0";
     private string _createNotes = "";
+    private decimal _createRate = 575m;
+    private string _createTruck = "";
+    private DateTime? _createLoadDate = DateTime.Today;
     private readonly List<DocSlot> _docSlots =
     [
         new(RecycleDocumentType.Bol, "BOL"),
         new(RecycleDocumentType.Nucor, "NUCOR"),
         new(RecycleDocumentType.Scale, "SCALE")
     ];
+
+    private string _editLoadId = "";
+    private string _editDriverId = "0";
+    private string _editBillToId = "0";
+    private string _editNotes = "";
+    private decimal _editRate = 575m;
+    private string _editTruck = "";
+    private DateTime? _editLoadDate;
+
+    private bool _showBillTo;
+    private int? _billToEditId;
+    private string _billToAlias = "";
+    private string _billToName = "";
+    private string _billToAddress = "";
+    private string _billToContact = "";
+    private bool _billToActive = true;
+
+    private string _invoiceBillToId = "0";
+    private DateTime? _invoicePickDate;
+    private DateOnly? _invoiceMonday;
+    private DateOnly? _invoiceFriday;
+    private bool _needReplacePassword;
+    private string _replacePassword = "";
 
     protected override async Task OnInitializedAsync()
     {
@@ -321,18 +598,27 @@ else
 
         if (!CurrentUser.CanManageScrapLogistics) return;
 
+        SelectLastWeek();
+
         try
         {
             await Busy.RunAsync(async () =>
             {
                 _drivers = await Loads.GetRecycleDriversAsync();
                 await LoadItemsAsync();
+                await LoadInvoicePanelsAsync();
             }, "Cargando agenda de reciclaje…");
         }
         catch (Exception ex)
         {
-            _error = ex.Message + " — ¿Ejecutaste 018_SpecialDrivers.sql?";
+            _error = ex.Message + " — ¿Ejecutaste 018 / 019 / 020_RecycleLoadBillTo.sql?";
         }
+    }
+
+    private async Task LoadInvoicePanelsAsync()
+    {
+        _billToCompanies = await Invoices.GetBillToCompaniesAsync(activeOnly: false);
+        _invoices = await Invoices.ListInvoicesAsync();
     }
 
     private async Task ReloadAsync()
@@ -363,12 +649,20 @@ else
         _items = await Loads.SearchAsync(driverId, from, to, _filterLoadId, verified);
     }
 
-    private void OpenCreate()
+    private async Task OpenCreateAsync()
     {
         _createLoadId = "";
         _createDriverId = "0";
         _createNotes = "";
+        _createRate = 575m;
+        _createTruck = "";
+        _createLoadDate = DateTime.Today;
         foreach (var s in _docSlots) s.File = null;
+
+        var defaultBillTo = await Loads.GetDefaultBillToCompanyIdAsync(
+            recordedByUserId: CurrentUser.UserId);
+        _createBillToId = defaultBillTo?.ToString() ?? "0";
+
         _showCreate = true;
     }
 
@@ -402,6 +696,18 @@ else
             return;
         }
 
+        if (!int.TryParse(_createBillToId, out var billToId) || billToId <= 0)
+        {
+            Toasts.Error("Selecciona la compañía a la que se vendió la carga.");
+            return;
+        }
+
+        if (_createLoadDate is null)
+        {
+            Toasts.Error("Selecciona la fecha de carga.");
+            return;
+        }
+
         if (_docSlots.Any(s => s.File is null))
         {
             Toasts.Error("Sube BOL, NUCOR y SCALE.");
@@ -412,7 +718,15 @@ else
         {
             await Busy.RunAsync(async () =>
             {
-                var load = await Loads.CreateLoadAsync(_createLoadId, driverId, _createNotes, recordedByStaff: true);
+                var load = await Loads.CreateLoadAsync(
+                    _createLoadId,
+                    driverId,
+                    _createNotes,
+                    recordedByStaff: true,
+                    billToCompanyId: billToId,
+                    rateUsd: _createRate,
+                    truckNumber: _createTruck,
+                    loadDate: DateOnly.FromDateTime(_createLoadDate.Value));
                 foreach (var slot in _docSlots)
                 {
                     await using var stream = slot.File!.OpenReadStream(8 * 1024 * 1024);
@@ -435,7 +749,64 @@ else
         }
     }
 
-    private void OpenDetail(RecycleLoad l) => _detail = l;
+    private void OpenDetail(RecycleLoad l)
+    {
+        _detail = l;
+        _editLoadId = l.LoadExternalId;
+        _editDriverId = l.DriverUserId.ToString();
+        _editBillToId = l.BillToCompanyId.ToString();
+        _editNotes = l.Notes ?? "";
+        _editRate = l.RateUsd;
+        _editTruck = l.TruckNumber ?? "";
+        _editLoadDate = l.LoadDate.ToDateTime(TimeOnly.MinValue);
+    }
+
+    private async Task SaveDetailMetaAsync()
+    {
+        if (_detail is null) return;
+        if (!int.TryParse(_editDriverId, out var driverId) || driverId <= 0)
+        {
+            Toasts.Error("Selecciona un chofer.");
+            return;
+        }
+
+        if (!int.TryParse(_editBillToId, out var billToId) || billToId <= 0)
+        {
+            Toasts.Error("Selecciona la compañía a la que se vendió la carga.");
+            return;
+        }
+
+        if (_editLoadDate is null)
+        {
+            Toasts.Error("Selecciona la fecha de carga.");
+            return;
+        }
+
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                await Loads.UpdateLoadMetaAsync(
+                    _detail.Id,
+                    _editLoadId,
+                    driverId,
+                    _editNotes,
+                    _editRate,
+                    _editTruck,
+                    DateOnly.FromDateTime(_editLoadDate.Value),
+                    billToId);
+                _detail = await Loads.GetByIdAsync(_detail.Id);
+                if (_detail is not null)
+                    OpenDetail(_detail);
+                await LoadItemsAsync();
+            }, "Guardando datos…");
+            Toasts.Success("Datos de la carga actualizados.");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+        }
+    }
 
     private async Task VerifyAsync(int id, bool verified)
     {
@@ -446,7 +817,11 @@ else
                 await Loads.SetVerifiedAsync(id, verified);
                 await LoadItemsAsync();
                 if (_detail?.Id == id)
+                {
                     _detail = await Loads.GetByIdAsync(id);
+                    if (_detail is not null)
+                        OpenDetail(_detail);
+                }
             }, "Actualizando…");
             Toasts.Success(verified ? "Marcada como verificada." : "Verificación quitada.");
         }
@@ -468,6 +843,8 @@ else
                 var path = await Media.SaveAsync(stream, file.Name, "recycle", _detail.Id, DocLabel(type));
                 await Loads.ReplaceDocumentAsync(_detail.Id, type, path);
                 _detail = await Loads.GetByIdAsync(_detail.Id);
+                if (_detail is not null)
+                    OpenDetail(_detail);
                 await LoadItemsAsync();
             }, "Reemplazando documento…");
             Toasts.Success($"{DocLabel(type)} actualizado. Queda pendiente de verificación.");
@@ -498,6 +875,158 @@ else
         }
     }
 
+    private void OpenBillToCreate()
+    {
+        _billToEditId = null;
+        _billToAlias = "";
+        _billToName = "";
+        _billToAddress = "";
+        _billToContact = "";
+        _billToActive = true;
+        _showBillTo = true;
+    }
+
+    private void OpenBillToEdit(RecycleBillToCompany c)
+    {
+        _billToEditId = c.Id;
+        _billToAlias = c.Alias;
+        _billToName = c.CompanyName;
+        _billToAddress = c.AddressLine;
+        _billToContact = c.ContactLine ?? "";
+        _billToActive = c.IsActive;
+        _showBillTo = true;
+    }
+
+    private async Task SaveBillToAsync()
+    {
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                await Invoices.UpsertBillToAsync(
+                    _billToEditId,
+                    _billToAlias,
+                    _billToName,
+                    _billToAddress,
+                    _billToContact,
+                    _billToActive);
+                await LoadInvoicePanelsAsync();
+            }, "Guardando compañía…");
+            _showBillTo = false;
+            Toasts.Success("Compañía BILL TO guardada.");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+        }
+    }
+
+    private void SelectLastWeek()
+    {
+        var (monday, friday) = RecycleInvoiceService.GetLastCompletedWorkWeek();
+        _invoiceMonday = monday;
+        _invoiceFriday = friday;
+        _invoicePickDate = monday.ToDateTime(TimeOnly.MinValue);
+        _needReplacePassword = false;
+        _replacePassword = "";
+    }
+
+    private void SnapInvoiceWeek()
+    {
+        if (_invoicePickDate is null)
+        {
+            _invoiceMonday = null;
+            _invoiceFriday = null;
+            return;
+        }
+
+        var (monday, friday) = RecycleInvoiceService.GetWorkWeek(DateOnly.FromDateTime(_invoicePickDate.Value));
+        _invoiceMonday = monday;
+        _invoiceFriday = friday;
+        _needReplacePassword = false;
+        _replacePassword = "";
+    }
+
+    private async Task GenerateInvoiceAsync()
+    {
+        if (!int.TryParse(_invoiceBillToId, out var billToId) || billToId <= 0)
+        {
+            Toasts.Error("Selecciona una compañía BILL TO.");
+            return;
+        }
+
+        if (_invoiceMonday is null || _invoiceFriday is null)
+        {
+            Toasts.Error("Selecciona la semana.");
+            return;
+        }
+
+        var monday = _invoiceMonday.Value;
+        var friday = _invoiceFriday.Value;
+
+        try
+        {
+            var existing = await Invoices.GetInvoiceForWeekAsync(monday, billToId);
+            if (existing is not null && string.IsNullOrWhiteSpace(_replacePassword))
+            {
+                _needReplacePassword = true;
+                Toasts.Error("Ya existe un invoice para esa semana y compañía. Ingresa tu contraseña para reemplazarlo.");
+                return;
+            }
+
+            await Busy.RunAsync(async () =>
+            {
+                var invoiceDate = YardTimeZone.TodayEastern();
+                await Invoices.CreateOrReplaceWeekAsync(
+                    monday,
+                    friday,
+                    billToId,
+                    invoiceDate,
+                    existing is not null ? _replacePassword : null,
+                    async (num, billTo, loads) =>
+                    {
+                        var bytes = InvoicePdf.GeneratePdf(num, invoiceDate, monday, friday, billTo, loads);
+                        var path = await Media.SaveRecycleInvoicePdfAsync(num, bytes);
+                        return (path, loads.Sum(l => l.RateUsd), loads.Count);
+                    });
+
+                await LoadInvoicePanelsAsync();
+            }, "Generando invoice…");
+
+            _needReplacePassword = false;
+            _replacePassword = "";
+            Toasts.Success("Invoice semanal generado.");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+            _error = ex.Message;
+        }
+    }
+
+    private async Task DownloadInvoiceAsync(RecycleWeeklyInvoice inv)
+    {
+        try
+        {
+            var bytes = Media.TryReadBytes(inv.PdfRelativePath);
+            if (bytes is null || bytes.Length == 0)
+            {
+                Toasts.Error("No se encontró el archivo PDF.");
+                return;
+            }
+
+            await Js.InvokeVoidAsync(
+                "rsyDownloadFile",
+                $"recycle-invoice-{inv.InvoiceNumber}.pdf",
+                "application/pdf",
+                Convert.ToBase64String(bytes));
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+        }
+    }
+
     private static string DocLabel(RecycleDocumentType t) => t switch
     {
         RecycleDocumentType.Bol => "BOL",
@@ -505,6 +1034,15 @@ else
         RecycleDocumentType.Scale => "SCALE",
         _ => t.ToString()
     };
+
+    private IEnumerable<RecycleBillToCompany> BillToOptionsForEdit()
+    {
+        var active = _billToCompanies.Where(c => c.IsActive);
+        if (_detail is null) return active;
+        var current = _billToCompanies.FirstOrDefault(c => c.Id == _detail.BillToCompanyId);
+        if (current is null || current.IsActive) return active;
+        return active.Prepend(current);
+    }
 
     private sealed class DocSlot(RecycleDocumentType type, string label)
     {

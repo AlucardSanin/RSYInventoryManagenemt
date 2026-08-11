@@ -52,7 +52,7 @@ public sealed class MediaStorageService(IWebHostEnvironment env)
         int entityId,
         CancellationToken cancellationToken = default)
     {
-        if (category is not ("invoice-templates" or "vehicle-invoices"))
+        if (category is not ("invoice-templates" or "vehicle-invoices" or "recycle-invoices"))
             throw new InvalidOperationException("Categoría de documento inválida.");
 
         var ext = Path.GetExtension(originalFileName);
@@ -63,9 +63,12 @@ public sealed class MediaStorageService(IWebHostEnvironment env)
         var absoluteDir = Path.Combine(env.WebRootPath, relativeDir);
         Directory.CreateDirectory(absoluteDir);
 
-        var fileName = category == "vehicle-invoices"
-            ? Path.GetFileName(originalFileName)
-            : $"template-{Guid.NewGuid():N}.pdf";
+        var fileName = category switch
+        {
+            "vehicle-invoices" => Path.GetFileName(originalFileName),
+            "recycle-invoices" => Path.GetFileName(originalFileName),
+            _ => $"template-{Guid.NewGuid():N}.pdf"
+        };
 
         if (string.IsNullOrWhiteSpace(fileName) || !fileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
             fileName = $"document-{Guid.NewGuid():N}.pdf";
@@ -79,6 +82,16 @@ public sealed class MediaStorageService(IWebHostEnvironment env)
         return "/" + relativeDir.Replace('\\', '/') + "/" + fileName;
     }
 
+    public async Task<string> SaveRecycleInvoicePdfAsync(
+        int invoiceNumber,
+        byte[] pdfBytes,
+        CancellationToken cancellationToken = default)
+    {
+        var fileName = $"recycle-invoice-{invoiceNumber}.pdf";
+        await using var stream = new MemoryStream(pdfBytes);
+        return await SaveDocumentAsync(stream, fileName, "recycle-invoices", invoiceNumber, cancellationToken);
+    }
+
     public async Task<string> SaveVehicleInvoicePdfAsync(
         int vehicleId,
         int invoiceNumber,
@@ -86,8 +99,9 @@ public sealed class MediaStorageService(IWebHostEnvironment env)
         bool signed,
         CancellationToken cancellationToken = default)
     {
-        var kind = signed ? "signed" : "unsigned";
-        var fileName = $"receipt-{invoiceNumber}-{kind}.pdf";
+        var fileName = signed
+            ? $"Purchase-Acknowledgement-{invoiceNumber}-signed.pdf"
+            : $"Purchase-Acknowledgement-{invoiceNumber}.pdf";
         await using var stream = new MemoryStream(pdfBytes);
         return await SaveDocumentAsync(stream, fileName, "vehicle-invoices", vehicleId, cancellationToken);
     }

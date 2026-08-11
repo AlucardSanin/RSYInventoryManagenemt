@@ -20,7 +20,7 @@ else
     <div class="page-panel mb-3">
         <h1 class="h4 mb-1">@_t.Hello, @_driver.DisplayName</h1>
         <p class="form-hint mb-3">@_t.Lead</p>
-        <button type="button" class="btn btn-primary w-100" @onclick="OpenRegister">@_t.RegisterLoad</button>
+        <button type="button" class="btn btn-primary w-100" @onclick="OpenRegisterAsync">@_t.RegisterLoad</button>
     </div>
 
     @if (!string.IsNullOrEmpty(_error))
@@ -52,7 +52,9 @@ else
                             }
                         </div>
                         <div class="form-hint">
-                            @YardTimeZone.ToEastern(l.RecordedAtUtc).ToString("yyyy-MM-dd HH:mm") · @l.Documents.Count/3 @_t.Docs
+                            @l.LoadDate.ToString("yyyy-MM-dd")
+                            · @(l.BillToCompany?.Alias ?? "—")
+                            · @YardTimeZone.ToEastern(l.RecordedAtUtc).ToString("HH:mm") · @l.Documents.Count/3 @_t.Docs
                         </div>
                     </div>
                 }
@@ -75,6 +77,24 @@ else
                     <div class="mb-3">
                         <label class="form-label">@_t.LoadId *</label>
                         <input class="form-control" @bind="_loadId" inputmode="text" autocomplete="off" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">@_t.SoldTo *</label>
+                        <select class="form-select" @bind="_billToId">
+                            <option value="0">@_t.SelectCompany</option>
+                            @foreach (var c in _billToCompanies)
+                            {
+                                <option value="@c.Id">@c.Alias — @c.CompanyName</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">@_t.Rate *</label>
+                        <input class="form-control" type="number" step="0.01" min="0.01" @bind="_rate" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">@_t.Truck</label>
+                        <input class="form-control" @bind="_truck" autocomplete="off" />
                     </div>
                     @foreach (var doc in _docs)
                     {
@@ -109,8 +129,12 @@ else
     private string? _error;
     private User? _driver;
     private List<RecycleLoad> _recent = [];
+    private List<RecycleBillToCompany> _billToCompanies = [];
     private string _loadId = "";
     private string _notes = "";
+    private string _billToId = "0";
+    private decimal _rate = 575m;
+    private string _truck = "";
     private UiText _t = UiText.Spanish;
     private readonly List<DocSlot> _docs =
     [
@@ -133,6 +157,7 @@ else
             _driver = portal.Value.Driver;
             _recent = portal.Value.Recent;
             _t = UiText.For(_driver.PreferredLanguage);
+            _billToCompanies = await Loads.GetActiveBillToCompaniesAsync();
         }
         finally
         {
@@ -140,11 +165,19 @@ else
         }
     }
 
-    private void OpenRegister()
+    private async Task OpenRegisterAsync()
     {
         _loadId = "";
         _notes = "";
+        _rate = 575m;
+        _truck = "";
         foreach (var d in _docs) d.File = null;
+
+        var defaultBillTo = _driver is null
+            ? null
+            : await Loads.GetDefaultBillToCompanyIdAsync(driverUserId: _driver.Id);
+        _billToId = defaultBillTo?.ToString() ?? "0";
+
         _showRegister = true;
     }
 
@@ -158,13 +191,19 @@ else
             return;
         }
 
+        if (!int.TryParse(_billToId, out var billToId) || billToId <= 0)
+        {
+            Toasts.Error(_t.NeedCompany);
+            return;
+        }
+
         _busy = true;
         _error = null;
         try
         {
             await Busy.RunAsync(async () =>
             {
-                var load = await Loads.CreateLoadFromDriverAsync(Token, _loadId, _notes);
+                var load = await Loads.CreateLoadFromDriverAsync(Token, _loadId, _notes, billToId, _rate, _truck);
                 foreach (var doc in _docs)
                 {
                     await using var stream = doc.File!.OpenReadStream(8 * 1024 * 1024);
@@ -212,11 +251,16 @@ else
         public string Pending { get; init; } = "";
         public string Docs { get; init; } = "";
         public string LoadId { get; init; } = "";
+        public string SoldTo { get; init; } = "";
+        public string SelectCompany { get; init; } = "";
+        public string Rate { get; init; } = "";
+        public string Truck { get; init; } = "";
         public string Notes { get; init; } = "";
         public string CameraHint { get; init; } = "";
         public string Cancel { get; init; } = "";
         public string Save { get; init; } = "";
         public string NeedAllDocs { get; init; } = "";
+        public string NeedCompany { get; init; } = "";
         public string Saved { get; init; } = "";
 
         public static UiText For(string? lang) =>
@@ -228,7 +272,7 @@ else
             Loading = "Cargando…",
             InvalidLink = "Enlace inválido o inactivo.",
             Hello = "Hola",
-            Lead = "Cuando dejes una carga, registra el ID y toma fotos de BOL, NUCOR y SCALE.",
+            Lead = "Cuando dejes una carga, registra el ID, la compañía y toma fotos de BOL, NUCOR y SCALE.",
             RegisterLoad = "Registrar carga",
             Recent = "Cargas recientes",
             Empty = "Aún no hay cargas registradas.",
@@ -236,11 +280,16 @@ else
             Pending = "Sin verificar",
             Docs = "docs",
             LoadId = "ID de la carga",
+            SoldTo = "Compañía (vendido a)",
+            SelectCompany = "Seleccionar…",
+            Rate = "Precio (USD)",
+            Truck = "Camión",
             Notes = "Notas (opcional)",
             CameraHint = "Usa la cámara o la galería",
             Cancel = "Cancelar",
             Save = "Guardar",
             NeedAllDocs = "Sube los 3 documentos.",
+            NeedCompany = "Selecciona la compañía a la que se vendió la carga.",
             Saved = "Carga registrada. Queda pendiente de verificación."
         };
 
@@ -250,7 +299,7 @@ else
             Loading = "Loading…",
             InvalidLink = "Invalid or inactive link.",
             Hello = "Hello",
-            Lead = "After dropping a load, enter the load ID and photo BOL, NUCOR, and SCALE.",
+            Lead = "After dropping a load, enter the load ID, sold-to company, and photo BOL, NUCOR, and SCALE.",
             RegisterLoad = "Register load",
             Recent = "Recent loads",
             Empty = "No loads yet.",
@@ -258,11 +307,16 @@ else
             Pending = "Unverified",
             Docs = "docs",
             LoadId = "Load ID",
+            SoldTo = "Sold to (company)",
+            SelectCompany = "Select…",
+            Rate = "Rate (USD)",
+            Truck = "Truck #",
             Notes = "Notes (optional)",
             CameraHint = "Use camera or gallery",
             Cancel = "Cancel",
             Save = "Save",
             NeedAllDocs = "Upload all 3 documents.",
+            NeedCompany = "Select the company this load was sold to.",
             Saved = "Load saved. Pending verification."
         };
     }

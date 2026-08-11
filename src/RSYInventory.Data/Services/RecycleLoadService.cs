@@ -45,6 +45,7 @@ public sealed class RecycleLoadService
         var q = db.RecycleLoads
             .AsNoTracking()
             .Include(l => l.Driver)
+            .Include(l => l.BillToCompany)
             .Include(l => l.RecordedByUser)
             .Include(l => l.VerifiedByUser)
             .Include(l => l.Documents)
@@ -54,18 +55,10 @@ public sealed class RecycleLoadService
             q = q.Where(l => l.DriverUserId == driverUserId);
 
         if (from is not null)
-        {
-            var fromUtc = TimeZoneInfo.ConvertTimeToUtc(from.Value.ToDateTime(TimeOnly.MinValue), YardTimeZone.EasternInfo);
-            q = q.Where(l => l.RecordedAtUtc >= fromUtc);
-        }
+            q = q.Where(l => l.LoadDate >= from);
 
         if (to is not null)
-        {
-            var toExclusive = TimeZoneInfo.ConvertTimeToUtc(
-                to.Value.AddDays(1).ToDateTime(TimeOnly.MinValue),
-                YardTimeZone.EasternInfo);
-            q = q.Where(l => l.RecordedAtUtc < toExclusive);
-        }
+            q = q.Where(l => l.LoadDate <= to);
 
         if (!string.IsNullOrWhiteSpace(loadId))
         {
@@ -79,7 +72,7 @@ public sealed class RecycleLoadService
             q = q.Where(l => !l.IsVerified);
 
         return await q
-            .OrderByDescending(l => l.RecordedAtUtc)
+            .OrderByDescending(l => l.LoadDate)
             .ThenByDescending(l => l.Id)
             .Take(500)
             .ToListAsync(ct);
@@ -92,10 +85,76 @@ public sealed class RecycleLoadService
         return await db.RecycleLoads
             .AsNoTracking()
             .Include(l => l.Driver)
+            .Include(l => l.BillToCompany)
             .Include(l => l.RecordedByUser)
             .Include(l => l.VerifiedByUser)
             .Include(l => l.Documents)
             .FirstOrDefaultAsync(l => l.Id == id, ct);
+    }
+
+    /// <summary>Active BILL TO companies for registration (staff and driver portal).</summary>
+    public async Task<List<RecycleBillToCompany>> GetActiveBillToCompaniesAsync(CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.RecycleBillToCompanies
+            .AsNoTracking()
+            .Where(c => c.IsActive)
+            .OrderBy(c => c.Alias)
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Default BILL TO for registration: last used by the given driver/recorder (if still active),
+    /// else RMR, else the only/first active company.
+    /// </summary>
+    public async Task<int?> GetDefaultBillToCompanyIdAsync(
+        int? driverUserId = null,
+        int? recordedByUserId = null,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var active = await db.RecycleBillToCompanies
+            .AsNoTracking()
+            .Where(c => c.IsActive)
+            .Select(c => new { c.Id, c.Alias })
+            .ToListAsync(ct);
+
+        if (active.Count == 0)
+            return null;
+
+        var activeIds = active.Select(c => c.Id).ToHashSet();
+
+        int? lastUsedId = null;
+        if (driverUserId is > 0)
+        {
+            lastUsedId = await db.RecycleLoads
+                .AsNoTracking()
+                .Where(l => l.DriverUserId == driverUserId.Value)
+                .OrderByDescending(l => l.RecordedAtUtc)
+                .ThenByDescending(l => l.Id)
+                .Select(l => (int?)l.BillToCompanyId)
+                .FirstOrDefaultAsync(ct);
+        }
+        else if (recordedByUserId is > 0)
+        {
+            lastUsedId = await db.RecycleLoads
+                .AsNoTracking()
+                .Where(l => l.RecordedByUserId == recordedByUserId.Value)
+                .OrderByDescending(l => l.RecordedAtUtc)
+                .ThenByDescending(l => l.Id)
+                .Select(l => (int?)l.BillToCompanyId)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        if (lastUsedId is int used && activeIds.Contains(used))
+            return used;
+
+        var rmr = active.FirstOrDefault(c =>
+            string.Equals(c.Alias, "RMR", StringComparison.OrdinalIgnoreCase));
+        if (rmr is not null)
+            return rmr.Id;
+
+        return active.OrderBy(c => c.Alias).First().Id;
     }
 
     public async Task<RecycleLoad> CreateLoadAsync(
@@ -103,6 +162,10 @@ public sealed class RecycleLoadService
         int driverUserId,
         string? notes,
         bool recordedByStaff,
+        int billToCompanyId,
+        decimal rateUsd = 575m,
+        string? truckNumber = null,
+        DateOnly? loadDate = null,
         CancellationToken ct = default)
     {
         if (recordedByStaff)
@@ -111,8 +174,16 @@ public sealed class RecycleLoadService
         loadExternalId = (loadExternalId ?? string.Empty).Trim();
         if (loadExternalId.Length == 0)
             throw new InvalidOperationException("El ID de la carga es obligatorio.");
+        if (rateUsd <= 0)
+            throw new InvalidOperationException("El precio debe ser mayor que cero.");
+        if (billToCompanyId <= 0)
+            throw new InvalidOperationException("Selecciona la compañía a la que se vendió la carga.");
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var billToOk = await db.RecycleBillToCompanies.AnyAsync(c => c.Id == billToCompanyId && c.IsActive, ct);
+        if (!billToOk)
+            throw new InvalidOperationException("Compañía BILL TO inválida o inactiva.");
+
         var driver = await db.Users
             .Include(u => u.Roles)
             .FirstOrDefaultAsync(u => u.Id == driverUserId && u.IsActive, ct)
@@ -122,11 +193,16 @@ public sealed class RecycleLoadService
             throw new InvalidOperationException("El usuario seleccionado no es chofer de reciclaje.");
 
         var actingUserId = recordedByStaff ? _currentUser.UserId : driverUserId;
+        var effectiveDate = loadDate ?? YardTimeZone.TodayEastern();
 
         var entity = new RecycleLoad
         {
             LoadExternalId = loadExternalId,
             DriverUserId = driverUserId,
+            BillToCompanyId = billToCompanyId,
+            LoadDate = effectiveDate,
+            RateUsd = Math.Round(rateUsd, 2, MidpointRounding.AwayFromZero),
+            TruckNumber = NullIfWhiteSpace(truckNumber),
             RecordedAtUtc = DateTime.UtcNow,
             RecordedByUserId = actingUserId,
             IsVerified = false,
@@ -146,7 +222,7 @@ public sealed class RecycleLoadService
                 "RecycleLoad",
                 entity.Id,
                 $"Carga reciclaje {entity.LoadExternalId} · chofer {driver.DisplayName}",
-                "Registrada por staff",
+                $"BILL TO #{entity.BillToCompanyId}; fecha {entity.LoadDate:yyyy-MM-dd}; ${entity.RateUsd:0.00}; truck {entity.TruckNumber ?? "—"}",
                 ct);
         }
         else
@@ -258,16 +334,29 @@ public sealed class RecycleLoadService
         string loadExternalId,
         int driverUserId,
         string? notes,
+        decimal rateUsd,
+        string? truckNumber,
+        DateOnly loadDate,
+        int billToCompanyId,
         CancellationToken ct = default)
     {
         EnsureCanManage();
         loadExternalId = (loadExternalId ?? string.Empty).Trim();
         if (loadExternalId.Length == 0)
             throw new InvalidOperationException("El ID de la carga es obligatorio.");
+        if (rateUsd <= 0)
+            throw new InvalidOperationException("El precio debe ser mayor que cero.");
+        if (billToCompanyId <= 0)
+            throw new InvalidOperationException("Selecciona la compañía a la que se vendió la carga.");
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var load = await db.RecycleLoads.FirstOrDefaultAsync(l => l.Id == loadId, ct)
             ?? throw new InvalidOperationException("Carga no encontrada.");
+
+        var billTo = await db.RecycleBillToCompanies.FirstOrDefaultAsync(c => c.Id == billToCompanyId, ct)
+            ?? throw new InvalidOperationException("Compañía BILL TO inválida.");
+        if (!billTo.IsActive && load.BillToCompanyId != billToCompanyId)
+            throw new InvalidOperationException("Compañía BILL TO inválida o inactiva.");
 
         var driverOk = await db.Users.AnyAsync(
             u => u.Id == driverUserId && u.IsActive && u.Roles.Any(r => r.Code == (int)AppRole.RecycleDriver),
@@ -277,7 +366,11 @@ public sealed class RecycleLoadService
 
         load.LoadExternalId = loadExternalId;
         load.DriverUserId = driverUserId;
+        load.BillToCompanyId = billToCompanyId;
         load.Notes = NullIfWhiteSpace(notes);
+        load.RateUsd = Math.Round(rateUsd, 2, MidpointRounding.AwayFromZero);
+        load.TruckNumber = NullIfWhiteSpace(truckNumber);
+        load.LoadDate = loadDate;
         load.UpdatedAtUtc = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
     }
@@ -347,8 +440,10 @@ public sealed class RecycleLoadService
         var recent = await db.RecycleLoads
             .AsNoTracking()
             .Include(l => l.Documents)
+            .Include(l => l.BillToCompany)
             .Where(l => l.DriverUserId == driver.Id)
-            .OrderByDescending(l => l.RecordedAtUtc)
+            .OrderByDescending(l => l.LoadDate)
+            .ThenByDescending(l => l.Id)
             .Take(30)
             .ToListAsync(ct);
 
@@ -359,13 +454,25 @@ public sealed class RecycleLoadService
         Guid token,
         string loadExternalId,
         string? notes,
+        int billToCompanyId,
+        decimal rateUsd = 575m,
+        string? truckNumber = null,
         CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var driver = await ResolveRecycleDriverByTokenAsync(db, token, ct)
             ?? throw new InvalidOperationException("Enlace inválido.");
 
-        return await CreateLoadAsync(loadExternalId, driver.Id, notes, recordedByStaff: false, ct);
+        return await CreateLoadAsync(
+            loadExternalId,
+            driver.Id,
+            notes,
+            recordedByStaff: false,
+            billToCompanyId,
+            rateUsd,
+            truckNumber,
+            loadDate: null,
+            ct);
     }
 
     private static async Task<User?> ResolveRecycleDriverByTokenAsync(
