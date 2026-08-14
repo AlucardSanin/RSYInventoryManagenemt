@@ -43,6 +43,24 @@
     text-transform: uppercase;
 }
 
+.nav-item--sub {
+    padding-left: 0.35rem;
+}
+
+.nav-item--sub ::deep .nav-link,
+.nav-item--sub .nav-link {
+    height: 2.5rem;
+    line-height: 2.5rem;
+    font-size: 0.86rem;
+    color: rgba(215, 215, 215, 0.88);
+}
+
+.nav-item--sub ::deep .nav-link span.bi,
+.nav-item--sub .nav-link span.bi {
+    margin-right: 0.55rem;
+    opacity: 0.85;
+}
+
 .bi {
     display: inline-block;
     position: relative;

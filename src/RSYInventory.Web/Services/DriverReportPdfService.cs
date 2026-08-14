@@ -17,11 +17,13 @@ public sealed class DriverReportPdfService
     public byte[] GeneratePdf(
         IReadOnlyList<DriverReportRow> rows,
         string? driverFilterName,
+        string? createdByFilterName,
         DateOnly? from,
         DateOnly? to,
         string includeLabel)
     {
         var titleDriver = string.IsNullOrWhiteSpace(driverFilterName) ? "Todos los choferes" : driverFilterName.Trim();
+        var titleCreator = string.IsNullOrWhiteSpace(createdByFilterName) ? "Todos los usuarios" : createdByFilterName.Trim();
         var range = FormatRange(from, to);
         var generatedAt = YardTimeZone.NowEastern().ToString("yyyy-MM-dd HH:mm") + " ET";
 
@@ -35,9 +37,9 @@ public sealed class DriverReportPdfService
 
                 page.Header().Column(col =>
                 {
-                    col.Item().Text("RSY · Reporte de recolección por chofer")
+                    col.Item().Text("RSY · Reporte de recolección")
                         .FontSize(14).SemiBold().FontColor(Colors.Grey.Darken4);
-                    col.Item().PaddingTop(4).Text($"Chofer: {titleDriver}").FontSize(10);
+                    col.Item().PaddingTop(4).Text($"Chofer: {titleDriver} · Creado por: {titleCreator}").FontSize(10);
                     col.Item().Text($"Rango: {range} · Incluye: {includeLabel}").FontSize(9).FontColor(Colors.Grey.Darken2);
                     col.Item().Text($"Generado: {generatedAt} · {rows.Count} fila(s)")
                         .FontSize(8).FontColor(Colors.Grey.Medium);
@@ -48,22 +50,23 @@ public sealed class DriverReportPdfService
                 {
                     table.ColumnsDefinition(c =>
                     {
-                        c.RelativeColumn(1.4f);
-                        c.RelativeColumn(1.6f);
+                        c.RelativeColumn(1.2f);
+                        c.RelativeColumn(1.2f);
+                        c.RelativeColumn(1.5f);
+                        c.RelativeColumn(1.8f);
+                        c.RelativeColumn(0.7f);
                         c.RelativeColumn(2.0f);
+                        c.RelativeColumn(0.85f);
                         c.RelativeColumn(0.8f);
-                        c.RelativeColumn(2.2f);
-                        c.RelativeColumn(0.9f);
-                        c.RelativeColumn(0.9f);
-                        c.RelativeColumn(0.9f);
-                        c.RelativeColumn(1.1f);
+                        c.RelativeColumn(0.8f);
+                        c.RelativeColumn(1.0f);
                     });
 
                     table.Header(h =>
                     {
                         foreach (var label in new[]
                                  {
-                                     "Chofer", "VIN", "Año / Modelo", "Precio", "Dirección",
+                                     "Chofer", "Creado por", "VIN", "Año / Modelo", "Precio", "Dirección",
                                      "Programado", "Ventana", "Status", "Recogida (ET)"
                                  })
                         {
@@ -85,6 +88,7 @@ public sealed class DriverReportPdfService
                             table.Cell().Element(c => BodyCellStyle(c, bg)).Text(text).FontSize(8);
 
                         Cell(r.DriverName);
+                        Cell(r.CreatedByName);
                         Cell(r.Vin);
                         Cell(model);
                         Cell(price);

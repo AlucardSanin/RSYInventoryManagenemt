@@ -212,6 +212,9 @@ else
                                     <a class="btn btn-sm btn-outline-secondary" href="@inv.PdfRelativePath" target="_blank" rel="noopener">Ver PDF</a>
                                     <button type="button" class="btn btn-sm btn-outline-primary"
                                             @onclick="() => DownloadInvoiceAsync(inv)">Descargar</button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger"
+                                            disabled="@Busy.IsBusy"
+                                            @onclick="() => AskDeleteInvoice(inv)">Eliminar</button>
                                 </td>
                             </tr>
                         }
@@ -534,6 +537,33 @@ else
     </div>
 }
 
+@if (_deleteInvoiceTarget is not null)
+{
+    <div class="modal-backdrop show"></div>
+    <div class="modal d-block" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5">Eliminar invoice #@_deleteInvoiceTarget.InvoiceNumber</h2>
+                    <button type="button" class="btn-close" @onclick="() => _deleteInvoiceTarget = null"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-0">
+                        ¿Eliminar el invoice #@_deleteInvoiceTarget.InvoiceNumber
+                        (@_deleteInvoiceTarget.WeekStartDate.ToString("yyyy-MM-dd") → @_deleteInvoiceTarget.WeekEndDate.ToString("yyyy-MM-dd"),
+                        @(_deleteInvoiceTarget.BillToCompany?.Alias ?? "—"))?
+                        Podrás volver a generarlo; el número se reutiliza cuando corresponde.
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="() => _deleteInvoiceTarget = null">Cancelar</button>
+                    <button type="button" class="btn btn-danger" disabled="@Busy.IsBusy" @onclick="ConfirmDeleteInvoiceAsync">Eliminar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 <ImageViewer @ref="_viewer" />
 
 @code {
@@ -587,6 +617,7 @@ else
     private DateOnly? _invoiceFriday;
     private bool _needReplacePassword;
     private string _replacePassword = "";
+    private RecycleWeeklyInvoice? _deleteInvoiceTarget;
 
     protected override async Task OnInitializedAsync()
     {
@@ -1024,6 +1055,33 @@ else
         catch (Exception ex)
         {
             Toasts.Error(ex.Message);
+        }
+    }
+
+    private void AskDeleteInvoice(RecycleWeeklyInvoice inv) => _deleteInvoiceTarget = inv;
+
+    private async Task ConfirmDeleteInvoiceAsync()
+    {
+        if (_deleteInvoiceTarget is null) return;
+        var inv = _deleteInvoiceTarget;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                var path = await Invoices.DeleteInvoiceAsync(inv.Id);
+                Media.TryDelete(path);
+                await LoadInvoicePanelsAsync();
+            }, "Eliminando invoice…");
+
+            _deleteInvoiceTarget = null;
+            _needReplacePassword = false;
+            _replacePassword = "";
+            Toasts.Success($"Invoice #{inv.InvoiceNumber} eliminado.");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+            _error = ex.Message;
         }
     }
 

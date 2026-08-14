@@ -33,63 +33,68 @@
                 </NavLink>
             </div>
 
-            @if (CurrentUser.CanViewInventory || CurrentUser.CanEditInventory || CurrentUser.CanManagePickupSchedule || CurrentUser.CanManageScrapLogistics)
+            @if (CurrentUser.CanViewInventory || CurrentUser.CanEditInventory)
             {
-                <p class="nav-section">Trabajo diario</p>
-                @if (CurrentUser.CanViewInventory || CurrentUser.CanEditInventory)
+                <p class="nav-section">Inventario</p>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="inventory" Match="NavLinkMatch.All">
+                        <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Ver piezas
+                    </NavLink>
+                </div>
+                @if (CurrentUser.CanEditInventory)
                 {
-                    <div class="nav-item px-3">
-                        <NavLink class="nav-link" href="inventory">
-                            <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Inventario
-                        </NavLink>
-                    </div>
-                    @if (CurrentUser.CanEditInventory)
-                    {
-                        <div class="nav-item px-3">
-                            <NavLink class="nav-link" href="inventory/new">
-                                <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Añadir pieza
-                            </NavLink>
-                        </div>
-                    }
-                }
-                @if (CurrentUser.CanManagePickupSchedule)
-                {
-                    <div class="nav-item px-3">
-                        <NavLink class="nav-link" href="vehicles/pickups">
-                            <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Agenda de recolección
-                        </NavLink>
-                    </div>
-                }
-                @if (CurrentUser.CanManageScrapLogistics)
-                {
-                    <div class="nav-item px-3">
-                        <NavLink class="nav-link" href="recycle/loads">
-                            <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Agenda de reciclaje
-                        </NavLink>
-                    </div>
-                    <div class="nav-item px-3">
-                        <NavLink class="nav-link" href="constructor/activity">
-                            <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Actividad constructora
+                    <div class="nav-item nav-item--sub px-3">
+                        <NavLink class="nav-link" href="inventory/new">
+                            <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Añadir pieza
                         </NavLink>
                     </div>
                 }
             }
 
-            @if (CurrentUser.CanViewVehicles)
+            @if (CurrentUser.CanManagePickupSchedule)
             {
+                <p class="nav-section">Recolección</p>
                 <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="vehicles">
-                        <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Vehículos
+                    <NavLink class="nav-link" href="vehicles/pickups">
+                        <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Agenda de recolección
                     </NavLink>
                 </div>
-                @if (CurrentUser.CanAcquireVehicles)
+            }
+
+            @if (CurrentUser.CanViewVehicles || CurrentUser.CanAcquireVehicles)
+            {
+                <p class="nav-section">Vehículos</p>
+                @if (CurrentUser.CanViewVehicles)
                 {
                     <div class="nav-item px-3">
+                        <NavLink class="nav-link" href="vehicles" Match="NavLinkMatch.All">
+                            <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Lista de vehículos
+                        </NavLink>
+                    </div>
+                }
+                @if (CurrentUser.CanAcquireVehicles)
+                {
+                    <div class="nav-item nav-item--sub px-3">
                         <NavLink class="nav-link" href="vehicles/acquire">
                             <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Registrar compra
                         </NavLink>
                     </div>
                 }
+            }
+
+            @if (CurrentUser.CanManageScrapLogistics)
+            {
+                <p class="nav-section">Chatarra</p>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="recycle/loads">
+                        <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Agenda de reciclaje
+                    </NavLink>
+                </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="constructor/activity">
+                        <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Actividad constructora
+                    </NavLink>
+                </div>
             }
 
             @if (CurrentUser.CanManageZones || CurrentUser.CanManageUsers)
@@ -107,7 +112,7 @@
                 {
                     <div class="nav-item px-3">
                         <NavLink class="nav-link" href="users">
-                            <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Usuarios
+                            <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Usuarios
                         </NavLink>
                     </div>
                     <div class="nav-item px-3">

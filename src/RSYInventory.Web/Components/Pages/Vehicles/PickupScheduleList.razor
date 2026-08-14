@@ -34,15 +34,25 @@ else if (_items is null)
 else
 {
     <div class="page-panel mb-3">
-        <h2 class="page-panel__title">Reporte por chofer</h2>
+        <h2 class="page-panel__title">Reporte de recolección</h2>
         <div class="row g-2 align-items-end">
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <label class="form-label">Chofer</label>
                 <select class="form-select" @bind="_reportDriverId">
                     <option value="0">Todos</option>
                     @foreach (var d in _drivers)
                     {
                         <option value="@d.Id">@d.DisplayName</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Creado por</label>
+                <select class="form-select" @bind="_reportCreatedById">
+                    <option value="0">Todos</option>
+                    @foreach (var u in _creators)
+                    {
+                        <option value="@u.Id">@u.DisplayName</option>
                     }
                 </select>
             </div>
@@ -54,7 +64,7 @@ else
                 <label class="form-label">Hasta</label>
                 <InputDate class="form-control" @bind-Value="_reportTo" />
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <label class="form-label">Incluir</label>
                 <select class="form-select" @bind="_reportMode">
                     <option value="both">Pendientes y recogidos</option>
@@ -101,6 +111,7 @@ else
                         <thead>
                             <tr>
                                 <th>Chofer</th>
+                                <th>Creado por</th>
                                 <th>VIN</th>
                                 <th>Año / Modelo</th>
                                 <th>Precio</th>
@@ -116,6 +127,7 @@ else
                             {
                                 <tr>
                                     <td>@r.DriverName</td>
+                                    <td>@r.CreatedByName</td>
                                     <td><code>@r.Vin</code></td>
                                     <td>@(r.Year?.ToString() ?? "—") @(r.Make) @(r.Model)</td>
                                     <td>@UsdMoney.FormatOrDash(r.PurchasePrice)</td>
@@ -211,7 +223,7 @@ else
 
     <div class="page-panel mb-3">
         <div class="row g-2 align-items-end">
-            <div class="col-md-5">
+            <div class="col-md-4">
                 <label class="form-label">Búsqueda</label>
                 <input class="form-control" placeholder="VIN, marca, modelo, chofer, dirección…"
                        @bind="_search" @bind:event="oninput" />
@@ -226,7 +238,17 @@ else
                     }
                 </select>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
+                <label class="form-label">Creado por</label>
+                <select class="form-select" @bind="_createdByFilter">
+                    <option value="">Todos</option>
+                    @foreach (var u in _creators)
+                    {
+                        <option value="@u.Id.ToString()">@u.DisplayName</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-2">
                 <p class="form-hint mb-0">@Filtered.Count() en agenda · los Recogido salen a la medianoche (hora NC)</p>
             </div>
         </div>
@@ -254,6 +276,7 @@ else
                         <th>Para recoger</th>
                         <th>Ventana</th>
                         <th>Chofer</th>
+                        <th>Creado por</th>
                         <th>Status</th>
                         <th>Hora recogida</th>
                         <th class="text-end">Acciones</th>
@@ -271,6 +294,7 @@ else
                             <td>@s.ScheduledPickupDate.ToString("yyyy-MM-dd")</td>
                             <td>@(string.IsNullOrWhiteSpace(s.ScheduledPickupWindow) ? "—" : s.ScheduledPickupWindow)</td>
                             <td>@(s.AssignedDriver?.DisplayName ?? "Sin asignar")</td>
+                            <td>@(s.CreatedByUser?.DisplayName ?? "—")</td>
                             <td>
                                 @if (s.Status == (byte)ScheduledPickupStatus.Pending)
                                 {
@@ -399,12 +423,15 @@ else
 
     private List<ScheduledVehiclePickup>? _items;
     private List<User> _drivers = [];
+    private List<User> _creators = [];
     private List<DriverReportRow>? _report;
     private int _reportPage = 1;
     private string? _error;
     private string _search = string.Empty;
     private string _driverFilter = string.Empty;
+    private string _createdByFilter = string.Empty;
     private string _reportDriverId = "0";
+    private string _reportCreatedById = "0";
     private string _reportMode = "both";
     private DateTime? _reportFrom;
     private DateTime? _reportTo;
@@ -438,6 +465,9 @@ else
             if (int.TryParse(_driverFilter, out var driverId) && driverId > 0)
                 q = q.Where(s => s.AssignedDriverUserId == driverId);
 
+            if (int.TryParse(_createdByFilter, out var createdById) && createdById > 0)
+                q = q.Where(s => s.CreatedByUserId == createdById);
+
             var s = _search.Trim();
             if (string.IsNullOrEmpty(s)) return q;
 
@@ -447,6 +477,7 @@ else
                 || Contains(x.Model, s)
                 || Contains(x.PickupAddress, s)
                 || Contains(x.AssignedDriver?.DisplayName, s)
+                || Contains(x.CreatedByUser?.DisplayName, s)
                 || Contains(x.Year?.ToString(), s));
         }
     }
@@ -467,6 +498,7 @@ else
             await Busy.RunAsync(async () =>
             {
                 _drivers = await Schedules.GetDriverUsersAsync();
+                _creators = await Schedules.GetScheduleCreatorUsersAsync();
                 _items = await Schedules.GetActiveScheduleAsync();
             }, "Cargando agenda…");
         }
@@ -517,6 +549,7 @@ else
             }
 
             var driverName = _drivers.FirstOrDefault(d => d.Id.ToString() == _reportDriverId)?.DisplayName;
+            var createdByName = _creators.FirstOrDefault(u => u.Id.ToString() == _reportCreatedById)?.DisplayName;
             DateOnly? from = _reportFrom is null ? null : DateOnly.FromDateTime(_reportFrom.Value);
             DateOnly? to = _reportTo is null ? null : DateOnly.FromDateTime(_reportTo.Value);
             var includeLabel = _reportMode switch
@@ -526,11 +559,12 @@ else
                 _ => "Pendientes y recogidos"
             };
 
-            var bytes = ReportPdf.GeneratePdf(_report, driverName, from, to, includeLabel);
-            var slug = string.IsNullOrWhiteSpace(driverName) ? "todos" : SanitizeFileName(driverName);
+            var bytes = ReportPdf.GeneratePdf(_report, driverName, createdByName, from, to, includeLabel);
+            var driverSlug = string.IsNullOrWhiteSpace(driverName) ? "todos-choferes" : SanitizeFileName(driverName);
+            var creatorSlug = string.IsNullOrWhiteSpace(createdByName) ? "todos-usuarios" : SanitizeFileName(createdByName);
             var fromPart = from?.ToString("yyyyMMdd") ?? "inicio";
             var toPart = to?.ToString("yyyyMMdd") ?? "fin";
-            var fileName = $"reporte-chofer-{slug}-{fromPart}-{toPart}.pdf";
+            var fileName = $"reporte-recoleccion-{driverSlug}-{creatorSlug}-{fromPart}-{toPart}.pdf";
 
             await Js.InvokeVoidAsync(
                 "rsyDownloadFile",
@@ -551,9 +585,10 @@ else
         var includePending = _reportMode is "both" or "pending";
         var includePicked = _reportMode is "both" or "picked";
         int? driverId = int.TryParse(_reportDriverId, out var id) && id > 0 ? id : null;
+        int? createdById = int.TryParse(_reportCreatedById, out var cid) && cid > 0 ? cid : null;
         DateOnly? from = _reportFrom is null ? null : DateOnly.FromDateTime(_reportFrom.Value);
         DateOnly? to = _reportTo is null ? null : DateOnly.FromDateTime(_reportTo.Value);
-        return await Schedules.GetDriverReportAsync(driverId, includePending, includePicked, from, to);
+        return await Schedules.GetDriverReportAsync(driverId, createdById, includePending, includePicked, from, to);
     }
 
     private void ClearReportPreview()

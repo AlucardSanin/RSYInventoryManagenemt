@@ -33,6 +33,33 @@ public sealed class PickupScheduleService
             .ToListAsync(ct);
     }
 
+    /// <summary>
+    /// Users for "Creado por": active users who can schedule pickups or register acquisitions
+    /// (same privilege as <see cref="ICurrentUserService.CanManagePickupSchedule"/> /
+    /// <see cref="ICurrentUserService.CanAcquireVehicles"/>).
+    /// </summary>
+    public async Task<List<User>> GetScheduleCreatorUsersAsync(CancellationToken ct = default)
+    {
+        EnsureCanManageSchedule();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+
+        // CanAcquireVehicles / CanManagePickupSchedule:
+        // VehicleAcquirer | InventoryEditor | ZoneManager | SystemAdmin
+        var scheduleRoleCodes = new[]
+        {
+            (int)AppRole.VehicleAcquirer,
+            (int)AppRole.InventoryEditor,
+            (int)AppRole.ZoneManager,
+            (int)AppRole.SystemAdmin
+        };
+
+        return await db.Users
+            .AsNoTracking()
+            .Where(u => u.IsActive && u.Roles.Any(r => scheduleRoleCodes.Contains(r.Code)))
+            .OrderBy(u => u.DisplayName)
+            .ToListAsync(ct);
+    }
+
     public async Task<List<ScheduledVehiclePickup>> GetActiveScheduleAsync(CancellationToken ct = default)
     {
         EnsureCanManageSchedule();
@@ -51,6 +78,7 @@ public sealed class PickupScheduleService
             .AsNoTracking()
             .Include(s => s.VehicleSource)
             .Include(s => s.AssignedDriver)
+            .Include(s => s.CreatedByUser)
             .Include(s => s.Images)
             .Where(s =>
                 s.Status == (byte)ScheduledPickupStatus.Pending
@@ -593,6 +621,7 @@ public sealed class PickupScheduleService
 
     public async Task<List<DriverReportRow>> GetDriverReportAsync(
         int? driverUserId,
+        int? createdByUserId,
         bool includePending,
         bool includePickedUp,
         DateOnly? from,
@@ -607,11 +636,15 @@ public sealed class PickupScheduleService
         var q = db.ScheduledVehiclePickups
             .AsNoTracking()
             .Include(s => s.AssignedDriver)
+            .Include(s => s.CreatedByUser)
             .Include(s => s.VehicleSource)
             .AsQueryable();
 
         if (driverUserId is > 0)
             q = q.Where(s => s.AssignedDriverUserId == driverUserId);
+
+        if (createdByUserId is > 0)
+            q = q.Where(s => s.CreatedByUserId == createdByUserId);
 
         var statuses = new List<byte>();
         if (includePending) statuses.Add((byte)ScheduledPickupStatus.Pending);
@@ -649,6 +682,7 @@ public sealed class PickupScheduleService
         var rows = scheduled.Select(s => new DriverReportRow(
             s.Id,
             s.AssignedDriver?.DisplayName ?? "Sin asignar",
+            s.CreatedByUser.DisplayName,
             s.Vin,
             s.Year,
             s.Make,
@@ -664,6 +698,7 @@ public sealed class PickupScheduleService
             s.VehicleSource.Name)).ToList();
 
         // Acquired vehicles linked to a driver (manual entry / backfill) that are not already in schedule rows.
+        // Kept when including recogidos so Vehicles-section cars still appear in-range.
         if (includePickedUp)
         {
             var promotedIds = rows
@@ -674,6 +709,7 @@ public sealed class PickupScheduleService
             var vehicleQuery = db.Vehicles
                 .AsNoTracking()
                 .Include(v => v.PickupDriverUser)
+                .Include(v => v.AcquiredByUser)
                 .Include(v => v.VehicleSource)
                 .Where(v => v.DeletedAtUtc == null
                             && v.PickupDriverUserId != null
@@ -681,6 +717,20 @@ public sealed class PickupScheduleService
 
             if (driverUserId is > 0)
                 vehicleQuery = vehicleQuery.Where(v => v.PickupDriverUserId == driverUserId);
+
+            // Agenda-creator filter: only vehicles promoted from that user's schedules
+            // (or acquired by them when there is no remaining schedule row).
+            if (createdByUserId is > 0)
+            {
+                var creatorId = createdByUserId.Value;
+                var vehicleIdsFromCreator = await db.ScheduledVehiclePickups
+                    .AsNoTracking()
+                    .Where(s => s.CreatedByUserId == creatorId && s.PromotedVehicleId != null)
+                    .Select(s => s.PromotedVehicleId!.Value)
+                    .ToListAsync(ct);
+                vehicleQuery = vehicleQuery.Where(v =>
+                    vehicleIdsFromCreator.Contains(v.Id) || v.AcquiredByUserId == creatorId);
+            }
 
             if (from is not null)
             {
@@ -705,6 +755,7 @@ public sealed class PickupScheduleService
                 rows.Add(new DriverReportRow(
                     -v.Id,
                     v.PickupDriverUser?.DisplayName ?? v.PickupDriver ?? "Sin asignar",
+                    v.AcquiredByUser?.DisplayName ?? "—",
                     v.Vin,
                     v.Year,
                     v.Make,
@@ -931,6 +982,7 @@ public sealed record DriverPortalSnapshot(User Driver, List<ScheduledVehiclePick
 public sealed record DriverReportRow(
     int Id,
     string DriverName,
+    string CreatedByName,
     string Vin,
     int? Year,
     string? Make,

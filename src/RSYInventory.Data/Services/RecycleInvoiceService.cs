@@ -337,6 +337,45 @@ public sealed class RecycleInvoiceService
         return entity;
     }
 
+    /// <summary>
+    /// Deletes a saved weekly invoice and rewinds the sequence when appropriate
+    /// so the next generate can reuse the freed number (floor 20).
+    /// Returns the PDF relative path for best-effort file cleanup.
+    /// </summary>
+    public async Task<string> DeleteInvoiceAsync(int invoiceId, CancellationToken ct = default)
+    {
+        EnsureCanManage();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var entity = await db.RecycleWeeklyInvoices.FirstOrDefaultAsync(i => i.Id == invoiceId, ct)
+            ?? throw new InvalidOperationException("Invoice no encontrado.");
+
+        var number = entity.InvoiceNumber;
+        var path = entity.PdfRelativePath;
+        var week = entity.WeekStartDate;
+
+        db.RecycleWeeklyInvoices.Remove(entity);
+        await db.SaveChangesAsync(ct);
+
+        var maxRemaining = await db.RecycleWeeklyInvoices
+            .Select(i => (int?)i.InvoiceNumber)
+            .MaxAsync(ct);
+        var desiredNext = Math.Max(20, (maxRemaining ?? 19) + 1);
+
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE dbo.RecycleInvoiceSequence SET NextNumber = {desiredNext} WHERE Id = 1",
+            ct);
+
+        await _audit.WriteAsync(
+            "RecycleWeeklyInvoiceDeleted",
+            "RecycleWeeklyInvoice",
+            invoiceId,
+            $"Invoice #{number} eliminado · semana {week:yyyy-MM-dd}",
+            $"NextNumber → {desiredNext}",
+            ct);
+
+        return path;
+    }
+
     private async Task EnsurePasswordForReplaceAsync(
         YardInventoryDbContext db,
         string? password,
