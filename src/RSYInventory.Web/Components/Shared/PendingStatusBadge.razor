@@ -1,0 +1,23 @@
+@*
+  Pending pickup status: shows alert + "Expirado" when the scheduled date (ET) has already passed.
+*@
+<span class="pickup-status-cell">
+    @if (IsExpired)
+    {
+        <span class="pickup-expired" title="La fecha de recolección ya pasó">
+            <svg class="pickup-expired__icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <path fill="currentColor"
+                      d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L6.1 5.995A.905.905 0 0 1 7 5h1zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z" />
+            </svg>
+            <span>Expirado</span>
+        </span>
+    }
+    <span class="badge-status badge-status--danger">Pendiente</span>
+</span>
+
+@code {
+    [Parameter, EditorRequired]
+    public DateOnly ScheduledDate { get; set; }
+
+    private bool IsExpired => ScheduledDate < YardTimeZone.TodayEastern();
+}

@@ -1,0 +1,678 @@
+@page "/vehicles/pickups"
+@inject PickupScheduleService Schedules
+@inject DriverReportPdfService ReportPdf
+@inject ICurrentUserService CurrentUser
+@inject UiBusyService Busy
+@inject ToastService Toasts
+@inject NavigationManager Nav
+@inject IJSRuntime Js
+
+<PageTitle>Agenda de recolección</PageTitle>
+
+<PageHeader Title="Agenda de recolección de vehículos"
+            Eyebrow="Trabajo diario"
+            Lead="Programa recogidas, asigna chofer y genera reportes. Al marcar Recogido pasa de inmediato a Adquiridos; esos recogidos salen de esta agenda a la medianoche (hora NC).">
+    @if (CurrentUser.CanManagePickupSchedule)
+    {
+        <a class="btn btn-primary" href="vehicles/pickups/new">Agendar recolección</a>
+    }
+</PageHeader>
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+@if (!CurrentUser.CanManagePickupSchedule)
+{
+    <div class="alert alert-warning">No tienes permiso para ver la agenda de recolección.</div>
+}
+else if (_items is null)
+{
+    <div class="page-panel"><p class="mb-0 text-muted">Cargando agenda…</p></div>
+}
+else
+{
+    <div class="page-panel mb-3">
+        <h2 class="page-panel__title">Reporte por chofer</h2>
+        <div class="row g-2 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label">Chofer</label>
+                <select class="form-select" @bind="_reportDriverId">
+                    <option value="0">Todos</option>
+                    @foreach (var d in _drivers)
+                    {
+                        <option value="@d.Id">@d.DisplayName</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Desde</label>
+                <InputDate class="form-control" @bind-Value="_reportFrom" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Hasta</label>
+                <InputDate class="form-control" @bind-Value="_reportTo" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Incluir</label>
+                <select class="form-select" @bind="_reportMode">
+                    <option value="both">Pendientes y recogidos</option>
+                    <option value="pending">Solo pendientes</option>
+                    <option value="picked">Solo recogidos</option>
+                </select>
+            </div>
+            <div class="col-md-2 d-flex flex-column gap-2">
+                <button type="button" class="btn btn-outline-primary w-100" @onclick="PreviewReportAsync" disabled="@Busy.IsBusy">
+                    Previsualizar
+                </button>
+                <button type="button"
+                        class="btn btn-primary w-100"
+                        @onclick="DownloadReportPdfAsync"
+                        disabled="@(Busy.IsBusy || _report is null || _report.Count == 0)">
+                    Generar PDF
+                </button>
+            </div>
+        </div>
+
+        @if (_report is not null)
+        {
+            <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mt-3">
+                <p class="form-hint mb-0">
+                    @if (_report.Count == 0)
+                    {
+                        <text>Sin resultados</text>
+                    }
+                    else
+                    {
+                        <text>Mostrando @_reportFromIndex–@_reportToIndex de @_report.Count · página @_reportPage de @_reportPageCount</text>
+                    }
+                </p>
+                <button type="button" class="btn btn-sm btn-link" @onclick="ClearReportPreview">Ocultar vista previa</button>
+            </div>
+            <div class="table-shell mt-2">
+                @if (_report.Count == 0)
+                {
+                    <p class="mb-0 text-muted">Sin resultados para ese filtro.</p>
+                }
+                else
+                {
+                    <table class="table table-sm table-hover align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Chofer</th>
+                                <th>VIN</th>
+                                <th>Año / Modelo</th>
+                                <th>Precio</th>
+                                <th>Dirección</th>
+                                <th>Programado</th>
+                                <th>Ventana</th>
+                                <th>Status</th>
+                                <th>Hora recogida (ET)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var r in ReportPageRows)
+                            {
+                                <tr>
+                                    <td>@r.DriverName</td>
+                                    <td><code>@r.Vin</code></td>
+                                    <td>@(r.Year?.ToString() ?? "—") @(r.Make) @(r.Model)</td>
+                                    <td>@UsdMoney.FormatOrDash(r.PurchasePrice)</td>
+                                    <td>@(r.PickupAddress ?? "—")</td>
+                                    <td>@r.ScheduledPickupDate.ToString("yyyy-MM-dd")</td>
+                                    <td>@(string.IsNullOrWhiteSpace(r.ScheduledPickupWindow) ? "—" : r.ScheduledPickupWindow)</td>
+                                    <td>
+                                        @if (r.Status == ScheduledPickupStatus.Pending)
+                                        {
+                                            <PendingStatusBadge ScheduledDate="@r.ScheduledPickupDate" />
+                                        }
+                                        else
+                                        {
+                                            <span class="badge-status badge-status--ok">Recogido</span>
+                                        }
+                                    </td>
+                                    <td>@(r.PickedUpAtEastern?.ToString("yyyy-MM-dd HH:mm") ?? "—")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+
+                    @if (_reportPageCount > 1)
+                    {
+                        <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mt-3">
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-secondary"
+                                    disabled="@(_reportPage <= 1 || Busy.IsBusy)"
+                                    @onclick="PreviousReportPage">Anterior</button>
+                            <span class="form-hint mb-0">Página @_reportPage / @_reportPageCount</span>
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-secondary"
+                                    disabled="@(_reportPage >= _reportPageCount || Busy.IsBusy)"
+                                    @onclick="NextReportPage">Siguiente</button>
+                        </div>
+                    }
+                }
+            </div>
+        }
+    </div>
+
+    <div class="page-panel mb-3">
+        <h2 class="page-panel__title">Enlaces de choferes</h2>
+        <p class="form-hint mb-3">Copia y envía el enlace al chofer. Entra sin contraseña a su agenda del día.</p>
+        @if (_drivers.Count == 0)
+        {
+            <p class="mb-0 text-muted">No hay usuarios con rol Chofer. Créalos en Usuarios.</p>
+        }
+        else
+        {
+            <div class="table-shell">
+                <table class="table table-sm table-hover align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Chofer</th>
+                            <th>Enlace</th>
+                            <th class="text-end">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var d in _drivers)
+                        {
+                            var link = d.DriverAccessToken is Guid token
+                                ? Nav.ToAbsoluteUri($"d/{token}").ToString()
+                                : null;
+                            <tr>
+                                <td><strong>@d.DisplayName</strong></td>
+                                <td>
+                                    @if (link is null)
+                                    {
+                                        <span class="text-muted">Sin enlace — regenera en Usuarios</span>
+                                    }
+                                    else
+                                    {
+                                        <div class="form-hint mono" style="max-width:28rem;word-break:break-all">@link</div>
+                                    }
+                                </td>
+                                <td class="text-end">
+                                    @if (link is not null)
+                                    {
+                                        <button type="button"
+                                                class="btn btn-sm btn-outline-secondary"
+                                                @onclick="() => CopyDriverLinkAsync(link)">Copiar enlace</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <div class="page-panel mb-3">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-5">
+                <label class="form-label">Búsqueda</label>
+                <input class="form-control" placeholder="VIN, marca, modelo, chofer, dirección…"
+                       @bind="_search" @bind:event="oninput" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Chofer</label>
+                <select class="form-select" @bind="_driverFilter">
+                    <option value="">Todos</option>
+                    @foreach (var d in _drivers)
+                    {
+                        <option value="@d.Id.ToString()">@d.DisplayName</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-4">
+                <p class="form-hint mb-0">@Filtered.Count() en agenda · los Recogido salen a la medianoche (hora NC)</p>
+            </div>
+        </div>
+    </div>
+
+    @if (!Filtered.Any())
+    {
+        <div class="page-panel empty-state">
+            <p class="empty-state__title">No hay vehículos programados</p>
+            <p class="mb-3">Agenda una recolección o ajusta los filtros.</p>
+            <a class="btn btn-primary" href="vehicles/pickups/new">Agendar recolección</a>
+        </div>
+    }
+    else
+    {
+        <div class="page-panel table-shell">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>VIN</th>
+                        <th>Año</th>
+                        <th>Marca / Modelo</th>
+                        <th>Precio</th>
+                        <th>Dirección</th>
+                        <th>Para recoger</th>
+                        <th>Ventana</th>
+                        <th>Chofer</th>
+                        <th>Status</th>
+                        <th>Hora recogida</th>
+                        <th class="text-end">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var s in Filtered)
+                    {
+                        <tr>
+                            <td><code>@s.Vin</code></td>
+                            <td>@(s.Year?.ToString() ?? "—")</td>
+                            <td><strong>@($"{s.Make} {s.Model}".Trim())</strong></td>
+                            <td>@UsdMoney.FormatOrDash(s.PurchasePrice)</td>
+                            <td>@(s.PickupAddress ?? "—")</td>
+                            <td>@s.ScheduledPickupDate.ToString("yyyy-MM-dd")</td>
+                            <td>@(string.IsNullOrWhiteSpace(s.ScheduledPickupWindow) ? "—" : s.ScheduledPickupWindow)</td>
+                            <td>@(s.AssignedDriver?.DisplayName ?? "Sin asignar")</td>
+                            <td>
+                                @if (s.Status == (byte)ScheduledPickupStatus.Pending)
+                                {
+                                    <PendingStatusBadge ScheduledDate="@s.ScheduledPickupDate" />
+                                }
+                                else
+                                {
+                                    <span class="badge-status badge-status--ok">Recogido</span>
+                                }
+                            </td>
+                            <td>
+                                @(s.PickedUpAtUtc is null
+                                    ? "—"
+                                    : YardTimeZone.ToEastern(s.PickedUpAtUtc.Value).ToString("HH:mm"))
+                            </td>
+                            <td class="text-end">
+                                @if (s.Status == (byte)ScheduledPickupStatus.Pending)
+                                {
+                                    <a class="btn btn-sm btn-outline-primary" href="@($"vehicles/pickups/{s.Id}/edit")">Editar</a>
+                                    <button type="button"
+                                            class="btn btn-sm btn-success"
+                                            disabled="@Busy.IsBusy"
+                                            @onclick="() => AskStaffPick(s)">Recogido</button>
+                                    <button type="button"
+                                            class="btn btn-sm btn-outline-danger"
+                                            disabled="@Busy.IsBusy"
+                                            @onclick="() => AskDelete(s)">Eliminar</button>
+                                }
+                                else if (PickupScheduleService.IsPickedUpStatus(s.Status))
+                                {
+                                    <button type="button"
+                                            class="btn btn-sm btn-outline-danger"
+                                            disabled="@Busy.IsBusy"
+                                            @onclick="() => AskStaffRevert(s)">No recogido</button>
+                                }
+                                else
+                                {
+                                    <span class="form-hint">—</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@if (_deleteTarget is not null)
+{
+    <div class="modal-backdrop show"></div>
+    <div class="modal d-block" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5">Eliminar recolección</h2>
+                    <button type="button" class="btn-close" @onclick="CancelDelete"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-0">
+                        ¿Seguro que quieres eliminar la recolección pendiente de
+                        <code>@_deleteTarget.Vin</code>?
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CancelDelete">Cancelar</button>
+                    <button type="button" class="btn btn-danger" disabled="@Busy.IsBusy" @onclick="ConfirmDeleteAsync">Eliminar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_staffPickTarget is not null)
+{
+    <div class="modal-backdrop show"></div>
+    <div class="modal d-block" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5">Marcar como recogido</h2>
+                    <button type="button" class="btn-close" @onclick="CancelStaffPick"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-0">
+                        ¿Seguro que quieres marcar como recogido
+                        <code>@_staffPickTarget.Vin</code>? Pasará a vehículos adquiridos.
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CancelStaffPick">Cancelar</button>
+                    <button type="button" class="btn btn-success" disabled="@Busy.IsBusy" @onclick="ConfirmStaffPickAsync">Sí, recogido</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_staffRevertTarget is not null)
+{
+    <div class="modal-backdrop show"></div>
+    <div class="modal d-block" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5">Revertir recogido</h2>
+                    <button type="button" class="btn-close" @onclick="CancelStaffRevert"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-0">
+                        ¿Seguro que quieres marcar como no recogido
+                        <code>@_staffRevertTarget.Vin</code>? Se quitará de vehículos adquiridos y volverá a pendiente.
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CancelStaffRevert">Cancelar</button>
+                    <button type="button" class="btn btn-danger" disabled="@Busy.IsBusy" @onclick="ConfirmStaffRevertAsync">Sí, no recogido</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private const int ReportPageSize = 10;
+
+    private List<ScheduledVehiclePickup>? _items;
+    private List<User> _drivers = [];
+    private List<DriverReportRow>? _report;
+    private int _reportPage = 1;
+    private string? _error;
+    private string _search = string.Empty;
+    private string _driverFilter = string.Empty;
+    private string _reportDriverId = "0";
+    private string _reportMode = "both";
+    private DateTime? _reportFrom;
+    private DateTime? _reportTo;
+    private ScheduledVehiclePickup? _deleteTarget;
+    private ScheduledVehiclePickup? _staffPickTarget;
+    private ScheduledVehiclePickup? _staffRevertTarget;
+
+    private int _reportPageCount =>
+        _report is null || _report.Count == 0
+            ? 1
+            : Math.Max(1, (int)Math.Ceiling(_report.Count / (double)ReportPageSize));
+
+    private int _reportFromIndex =>
+        _report is null || _report.Count == 0 ? 0 : ((_reportPage - 1) * ReportPageSize) + 1;
+
+    private int _reportToIndex =>
+        _report is null ? 0 : Math.Min(_reportPage * ReportPageSize, _report.Count);
+
+    private IEnumerable<DriverReportRow> ReportPageRows =>
+        _report is null
+            ? []
+            : _report.Skip((_reportPage - 1) * ReportPageSize).Take(ReportPageSize);
+
+    private IEnumerable<ScheduledVehiclePickup> Filtered
+    {
+        get
+        {
+            if (_items is null) return [];
+            IEnumerable<ScheduledVehiclePickup> q = _items;
+
+            if (int.TryParse(_driverFilter, out var driverId) && driverId > 0)
+                q = q.Where(s => s.AssignedDriverUserId == driverId);
+
+            var s = _search.Trim();
+            if (string.IsNullOrEmpty(s)) return q;
+
+            return q.Where(x =>
+                Contains(x.Vin, s)
+                || Contains(x.Make, s)
+                || Contains(x.Model, s)
+                || Contains(x.PickupAddress, s)
+                || Contains(x.AssignedDriver?.DisplayName, s)
+                || Contains(x.Year?.ToString(), s));
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CurrentUser.IsAuthenticated)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        if (!CurrentUser.CanManagePickupSchedule)
+            return;
+
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                _drivers = await Schedules.GetDriverUsersAsync();
+                _items = await Schedules.GetActiveScheduleAsync();
+            }, "Cargando agenda…");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message + " — ¿Ejecutaste 015_DriverPickupSchedule.sql?";
+        }
+    }
+
+    private async Task PreviewReportAsync()
+    {
+        _error = null;
+        _reportPage = 1;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                _report = await LoadReportRowsAsync();
+            }, "Cargando vista previa…");
+
+            if (_report is null || _report.Count == 0)
+                Toasts.Info("Sin resultados para ese filtro.");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+            _error = ex.Message;
+        }
+    }
+
+    private async Task DownloadReportPdfAsync()
+    {
+        _error = null;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                // Fresh query so PDF matches current filters even without preview.
+                _report = await LoadReportRowsAsync();
+                if (_reportPage > _reportPageCount)
+                    _reportPage = _reportPageCount;
+            }, "Generando PDF…");
+
+            if (_report is null || _report.Count == 0)
+            {
+                Toasts.Info("Sin resultados para ese filtro.");
+                return;
+            }
+
+            var driverName = _drivers.FirstOrDefault(d => d.Id.ToString() == _reportDriverId)?.DisplayName;
+            DateOnly? from = _reportFrom is null ? null : DateOnly.FromDateTime(_reportFrom.Value);
+            DateOnly? to = _reportTo is null ? null : DateOnly.FromDateTime(_reportTo.Value);
+            var includeLabel = _reportMode switch
+            {
+                "pending" => "Solo pendientes",
+                "picked" => "Solo recogidos",
+                _ => "Pendientes y recogidos"
+            };
+
+            var bytes = ReportPdf.GeneratePdf(_report, driverName, from, to, includeLabel);
+            var slug = string.IsNullOrWhiteSpace(driverName) ? "todos" : SanitizeFileName(driverName);
+            var fromPart = from?.ToString("yyyyMMdd") ?? "inicio";
+            var toPart = to?.ToString("yyyyMMdd") ?? "fin";
+            var fileName = $"reporte-chofer-{slug}-{fromPart}-{toPart}.pdf";
+
+            await Js.InvokeVoidAsync(
+                "rsyDownloadFile",
+                fileName,
+                "application/pdf",
+                Convert.ToBase64String(bytes));
+            Toasts.Success($"PDF descargado ({_report.Count} filas).");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error("No se pudo generar el PDF: " + ex.Message);
+            _error = ex.Message;
+        }
+    }
+
+    private async Task<List<DriverReportRow>> LoadReportRowsAsync()
+    {
+        var includePending = _reportMode is "both" or "pending";
+        var includePicked = _reportMode is "both" or "picked";
+        int? driverId = int.TryParse(_reportDriverId, out var id) && id > 0 ? id : null;
+        DateOnly? from = _reportFrom is null ? null : DateOnly.FromDateTime(_reportFrom.Value);
+        DateOnly? to = _reportTo is null ? null : DateOnly.FromDateTime(_reportTo.Value);
+        return await Schedules.GetDriverReportAsync(driverId, includePending, includePicked, from, to);
+    }
+
+    private void ClearReportPreview()
+    {
+        _report = null;
+        _reportPage = 1;
+    }
+
+    private void PreviousReportPage()
+    {
+        if (_reportPage <= 1) return;
+        _reportPage--;
+    }
+
+    private void NextReportPage()
+    {
+        if (_reportPage >= _reportPageCount) return;
+        _reportPage++;
+    }
+
+    private static string SanitizeFileName(string value)
+    {
+        var chars = value.Trim().ToLowerInvariant()
+            .Select(c => char.IsLetterOrDigit(c) ? c : '-')
+            .ToArray();
+        var s = new string(chars);
+        while (s.Contains("--", StringComparison.Ordinal))
+            s = s.Replace("--", "-", StringComparison.Ordinal);
+        return s.Trim('-');
+    }
+
+    private void AskDelete(ScheduledVehiclePickup s) => _deleteTarget = s;
+    private void CancelDelete() => _deleteTarget = null;
+
+    private void AskStaffPick(ScheduledVehiclePickup s) => _staffPickTarget = s;
+    private void CancelStaffPick() => _staffPickTarget = null;
+
+    private void AskStaffRevert(ScheduledVehiclePickup s) => _staffRevertTarget = s;
+    private void CancelStaffRevert() => _staffRevertTarget = null;
+
+    private async Task ConfirmStaffPickAsync()
+    {
+        if (_staffPickTarget is null || Busy.IsBusy) return;
+        var id = _staffPickTarget.Id;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                await Schedules.StaffMarkPickedUpAsync(id);
+                _items = await Schedules.GetActiveScheduleAsync();
+            }, "Marcando recogido…");
+            Toasts.Success("Marcado como recogido y añadido a adquiridos.");
+            _staffPickTarget = null;
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+            _error = ex.Message;
+        }
+    }
+
+    private async Task ConfirmStaffRevertAsync()
+    {
+        if (_staffRevertTarget is null || Busy.IsBusy) return;
+        var id = _staffRevertTarget.Id;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                await Schedules.StaffRevertToPendingAsync(id);
+                _items = await Schedules.GetActiveScheduleAsync();
+            }, "Revirtiendo…");
+            Toasts.Success("Revertido a pendiente.");
+            _staffRevertTarget = null;
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+            _error = ex.Message;
+        }
+    }
+
+    private async Task CopyDriverLinkAsync(string link)
+    {
+        if (string.IsNullOrWhiteSpace(link)) return;
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", link);
+            Toasts.Success("Enlace del chofer copiado.");
+        }
+        catch
+        {
+            Toasts.Error("No se pudo copiar. Selecciona el enlace y cópialo manualmente.");
+        }
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (_deleteTarget is null || Busy.IsBusy) return;
+        var id = _deleteTarget.Id;
+        _error = null;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                await Schedules.DeletePendingAsync(id);
+                _items = await Schedules.GetActiveScheduleAsync();
+            }, "Eliminando…");
+            Toasts.Success("Recolección eliminada.");
+            _deleteTarget = null;
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+            _error = ex.Message;
+        }
+    }
+
+    private static bool Contains(string? haystack, string needle)
+        => !string.IsNullOrEmpty(haystack)
+           && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
+}

@@ -25,4 +25,10 @@ public interface ICurrentUserService
 
     /// <summary>God user: create/edit users and assign access levels.</summary>
     bool CanManageUsers { get; }
+
+    /// <summary>Create/manage scheduled vehicle pickups and driver reports.</summary>
+    bool CanManagePickupSchedule { get; }
+
+    /// <summary>Manage recycle loads and constructor activity logs.</summary>
+    bool CanManageScrapLogistics { get; }
 }

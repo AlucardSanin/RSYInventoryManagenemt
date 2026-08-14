@@ -48,6 +48,10 @@ public sealed class DatabaseCurrentUserService : ICurrentUserService
 
     public bool CanManageUsers => HasRole(AppRole.SystemAdmin);
 
+    public bool CanManagePickupSchedule => CanAcquireVehicles || CanEditVehicles;
+
+    public bool CanManageScrapLogistics => HasRole(AppRole.ScrapLogisticsAdmin) || CanManageUsers;
+
     private CurrentUserSnapshot Require() =>
         _state.Snapshot
         ?? throw new InvalidOperationException("No hay sesión activa. Inicie sesión.");

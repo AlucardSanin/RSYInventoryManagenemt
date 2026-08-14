@@ -46,6 +46,8 @@ builder.Services.Configure<DocuSealOptions>(
     builder.Configuration.GetSection(DocuSealOptions.SectionName));
 
 builder.Services.AddSingleton<PurchaseInvoicePdfService>();
+builder.Services.AddSingleton<DriverReportPdfService>();
+builder.Services.AddSingleton<RecycleWeeklyInvoicePdfService>();
 builder.Services.AddSingleton<DocuSealMasterTemplateService>();
 builder.Services.AddScoped<InvoiceEmailService>();
 builder.Services.AddHttpClient<DocuSealClient>((sp, client) =>

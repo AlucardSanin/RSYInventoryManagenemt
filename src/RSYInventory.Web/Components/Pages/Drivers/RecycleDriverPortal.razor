@@ -1,0 +1,323 @@
+@page "/r/{Token:guid}"
+@layout PublicLayout
+@inject RecycleLoadService Loads
+@inject MediaStorageService Media
+@inject UiBusyService Busy
+@inject ToastService Toasts
+
+<PageTitle>@_t.Title</PageTitle>
+
+@if (_loading)
+{
+    <div class="page-panel"><p class="mb-0 text-muted">@_t.Loading</p></div>
+}
+else if (_driver is null)
+{
+    <div class="alert alert-danger">@_t.InvalidLink</div>
+}
+else
+{
+    <div class="page-panel mb-3">
+        <h1 class="h4 mb-1">@_t.Hello, @_driver.DisplayName</h1>
+        <p class="form-hint mb-3">@_t.Lead</p>
+        <button type="button" class="btn btn-primary w-100" @onclick="OpenRegisterAsync">@_t.RegisterLoad</button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-danger">@_error</div>
+    }
+
+    <div class="page-panel">
+        <h2 class="h6">@_t.Recent</h2>
+        @if (_recent.Count == 0)
+        {
+            <p class="mb-0 text-muted">@_t.Empty</p>
+        }
+        else
+        {
+            <div class="driver-card-list">
+                @foreach (var l in _recent)
+                {
+                    <div class="driver-card">
+                        <div class="driver-card__row">
+                            <strong>ID @l.LoadExternalId</strong>
+                            @if (l.IsVerified)
+                            {
+                                <span class="badge-status badge-status--ok">@_t.Verified</span>
+                            }
+                            else
+                            {
+                                <span class="badge-status badge-status--warn">@_t.Pending</span>
+                            }
+                        </div>
+                        <div class="form-hint">
+                            @l.LoadDate.ToString("yyyy-MM-dd")
+                            · @(l.BillToCompany?.Alias ?? "—")
+                            · @YardTimeZone.ToEastern(l.RecordedAtUtc).ToString("HH:mm") · @l.Documents.Count/3 @_t.Docs
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@if (_showRegister)
+{
+    <div class="modal-backdrop show"></div>
+    <div class="modal d-block" tabindex="-1">
+        <div class="modal-dialog modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5">@_t.RegisterLoad</h2>
+                    <button type="button" class="btn-close" @onclick="() => _showRegister = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">@_t.LoadId *</label>
+                        <input class="form-control" @bind="_loadId" inputmode="text" autocomplete="off" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">@_t.SoldTo *</label>
+                        <select class="form-select" @bind="_billToId">
+                            <option value="0">@_t.SelectCompany</option>
+                            @foreach (var c in _billToCompanies)
+                            {
+                                <option value="@c.Id">@c.Alias — @c.CompanyName</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">@_t.Rate *</label>
+                        <input class="form-control" type="number" step="0.01" min="0.01" @bind="_rate" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">@_t.Truck</label>
+                        <input class="form-control" @bind="_truck" autocomplete="off" />
+                    </div>
+                    @foreach (var doc in _docs)
+                    {
+                        <div class="mb-3">
+                            <label class="form-label">@doc.Label *</label>
+                            <InputFile class="form-control"
+                                       accept="image/*" capture="environment"
+                                       OnChange="e => OnDoc(doc, e)" />
+                            <div class="form-hint">@(doc.File?.Name ?? _t.CameraHint)</div>
+                        </div>
+                    }
+                    <div>
+                        <label class="form-label">@_t.Notes</label>
+                        <textarea class="form-control" rows="2" @bind="_notes"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="() => _showRegister = false">@_t.Cancel</button>
+                    <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync">@_t.Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid Token { get; set; }
+
+    private bool _loading = true;
+    private bool _busy;
+    private bool _showRegister;
+    private string? _error;
+    private User? _driver;
+    private List<RecycleLoad> _recent = [];
+    private List<RecycleBillToCompany> _billToCompanies = [];
+    private string _loadId = "";
+    private string _notes = "";
+    private string _billToId = "0";
+    private decimal _rate = 575m;
+    private string _truck = "";
+    private UiText _t = UiText.Spanish;
+    private readonly List<DocSlot> _docs =
+    [
+        new(RecycleDocumentType.Bol, "BOL"),
+        new(RecycleDocumentType.Nucor, "NUCOR"),
+        new(RecycleDocumentType.Scale, "SCALE")
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var portal = await Loads.GetDriverPortalAsync(Token);
+            if (portal is null)
+            {
+                _driver = null;
+                return;
+            }
+
+            _driver = portal.Value.Driver;
+            _recent = portal.Value.Recent;
+            _t = UiText.For(_driver.PreferredLanguage);
+            _billToCompanies = await Loads.GetActiveBillToCompaniesAsync();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task OpenRegisterAsync()
+    {
+        _loadId = "";
+        _notes = "";
+        _rate = 575m;
+        _truck = "";
+        foreach (var d in _docs) d.File = null;
+
+        var defaultBillTo = _driver is null
+            ? null
+            : await Loads.GetDefaultBillToCompanyIdAsync(driverUserId: _driver.Id);
+        _billToId = defaultBillTo?.ToString() ?? "0";
+
+        _showRegister = true;
+    }
+
+    private void OnDoc(DocSlot slot, InputFileChangeEventArgs e) => slot.File = e.File;
+
+    private async Task SaveAsync()
+    {
+        if (_docs.Any(d => d.File is null))
+        {
+            Toasts.Error(_t.NeedAllDocs);
+            return;
+        }
+
+        if (!int.TryParse(_billToId, out var billToId) || billToId <= 0)
+        {
+            Toasts.Error(_t.NeedCompany);
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                var load = await Loads.CreateLoadFromDriverAsync(Token, _loadId, _notes, billToId, _rate, _truck);
+                foreach (var doc in _docs)
+                {
+                    await using var stream = doc.File!.OpenReadStream(8 * 1024 * 1024);
+                    var path = await Media.SaveAsync(stream, doc.File.Name, "recycle", load.Id, doc.Label);
+                    await Loads.AttachDocumentAsync(load.Id, doc.Type, path, Token);
+                }
+
+                await Loads.EnsureCompleteDocumentsAsync(load.Id);
+                var portal = await Loads.GetDriverPortalAsync(Token);
+                _recent = portal?.Recent ?? [];
+            }, "…");
+
+            _showRegister = false;
+            Toasts.Success(_t.Saved);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Toasts.Error(ex.Message);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private sealed class DocSlot(RecycleDocumentType type, string label)
+    {
+        public RecycleDocumentType Type { get; } = type;
+        public string Label { get; } = label;
+        public IBrowserFile? File { get; set; }
+    }
+
+    private sealed class UiText
+    {
+        public string Title { get; init; } = "";
+        public string Loading { get; init; } = "";
+        public string InvalidLink { get; init; } = "";
+        public string Hello { get; init; } = "";
+        public string Lead { get; init; } = "";
+        public string RegisterLoad { get; init; } = "";
+        public string Recent { get; init; } = "";
+        public string Empty { get; init; } = "";
+        public string Verified { get; init; } = "";
+        public string Pending { get; init; } = "";
+        public string Docs { get; init; } = "";
+        public string LoadId { get; init; } = "";
+        public string SoldTo { get; init; } = "";
+        public string SelectCompany { get; init; } = "";
+        public string Rate { get; init; } = "";
+        public string Truck { get; init; } = "";
+        public string Notes { get; init; } = "";
+        public string CameraHint { get; init; } = "";
+        public string Cancel { get; init; } = "";
+        public string Save { get; init; } = "";
+        public string NeedAllDocs { get; init; } = "";
+        public string NeedCompany { get; init; } = "";
+        public string Saved { get; init; } = "";
+
+        public static UiText For(string? lang) =>
+            string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase) ? English : Spanish;
+
+        public static UiText Spanish { get; } = new()
+        {
+            Title = "Reciclaje",
+            Loading = "Cargando…",
+            InvalidLink = "Enlace inválido o inactivo.",
+            Hello = "Hola",
+            Lead = "Cuando dejes una carga, registra el ID, la compañía y toma fotos de BOL, NUCOR y SCALE.",
+            RegisterLoad = "Registrar carga",
+            Recent = "Cargas recientes",
+            Empty = "Aún no hay cargas registradas.",
+            Verified = "Verificado",
+            Pending = "Sin verificar",
+            Docs = "docs",
+            LoadId = "ID de la carga",
+            SoldTo = "Compañía (vendido a)",
+            SelectCompany = "Seleccionar…",
+            Rate = "Precio (USD)",
+            Truck = "Camión",
+            Notes = "Notas (opcional)",
+            CameraHint = "Usa la cámara o la galería",
+            Cancel = "Cancelar",
+            Save = "Guardar",
+            NeedAllDocs = "Sube los 3 documentos.",
+            NeedCompany = "Selecciona la compañía a la que se vendió la carga.",
+            Saved = "Carga registrada. Queda pendiente de verificación."
+        };
+
+        public static UiText English { get; } = new()
+        {
+            Title = "Recycling",
+            Loading = "Loading…",
+            InvalidLink = "Invalid or inactive link.",
+            Hello = "Hello",
+            Lead = "After dropping a load, enter the load ID, sold-to company, and photo BOL, NUCOR, and SCALE.",
+            RegisterLoad = "Register load",
+            Recent = "Recent loads",
+            Empty = "No loads yet.",
+            Verified = "Verified",
+            Pending = "Unverified",
+            Docs = "docs",
+            LoadId = "Load ID",
+            SoldTo = "Sold to (company)",
+            SelectCompany = "Select…",
+            Rate = "Rate (USD)",
+            Truck = "Truck #",
+            Notes = "Notes (optional)",
+            CameraHint = "Use camera or gallery",
+            Cancel = "Cancel",
+            Save = "Save",
+            NeedAllDocs = "Upload all 3 documents.",
+            NeedCompany = "Select the company this load was sold to.",
+            Saved = "Load saved. Pending verification."
+        };
+    }
+}

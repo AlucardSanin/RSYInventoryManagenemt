@@ -34,6 +34,20 @@ public partial class YardInventoryDbContext : DbContext
 
     public virtual DbSet<InvoiceTemplate> InvoiceTemplates { get; set; }
 
+    public virtual DbSet<ScheduledVehiclePickup> ScheduledVehiclePickups { get; set; }
+
+    public virtual DbSet<ScheduledVehiclePickupImage> ScheduledVehiclePickupImages { get; set; }
+
+    public virtual DbSet<RecycleLoad> RecycleLoads { get; set; }
+
+    public virtual DbSet<RecycleLoadDocument> RecycleLoadDocuments { get; set; }
+
+    public virtual DbSet<RecycleBillToCompany> RecycleBillToCompanies { get; set; }
+
+    public virtual DbSet<RecycleWeeklyInvoice> RecycleWeeklyInvoices { get; set; }
+
+    public virtual DbSet<ConstructorActivityLog> ConstructorActivityLogs { get; set; }
+
     public virtual DbSet<Zone> Zones { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -161,7 +175,11 @@ public partial class YardInventoryDbContext : DbContext
             entity.Property(e => e.Email).HasMaxLength(256);
             entity.Property(e => e.IsActive).HasDefaultValue(true);
             entity.Property(e => e.PasswordHash).HasMaxLength(500);
+            entity.Property(e => e.PreferredLanguage).HasMaxLength(5).HasDefaultValue("es");
             entity.Property(e => e.UserName).HasMaxLength(100);
+            entity.HasIndex(e => e.DriverAccessToken, "UQ_Users_DriverAccessToken")
+                .IsUnique()
+                .HasFilter("[DriverAccessToken] IS NOT NULL");
 
             entity.HasMany(d => d.Roles).WithMany(p => p.Users)
                 .UsingEntity<Dictionary<string, object>>(
@@ -203,10 +221,17 @@ public partial class YardInventoryDbContext : DbContext
             entity.Property(e => e.SignedPdfRelativePath).HasMaxLength(400);
             entity.Property(e => e.Vin).HasMaxLength(17);
 
+            entity.HasIndex(e => e.PickupDriverUserId, "IX_Vehicles_PickupDriverUserId");
+
             entity.HasOne(d => d.AcquiredByUser).WithMany(p => p.Vehicles)
                 .HasForeignKey(d => d.AcquiredByUserId)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_Vehicles_Users");
+
+            entity.HasOne(d => d.PickupDriverUser).WithMany(p => p.PickedUpVehicles)
+                .HasForeignKey(d => d.PickupDriverUserId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("FK_Vehicles_PickupDriverUser");
 
             entity.HasOne(d => d.Pallet).WithMany(p => p.Vehicles)
                 .HasForeignKey(d => d.PalletId)
@@ -256,6 +281,170 @@ public partial class YardInventoryDbContext : DbContext
             entity.Property(e => e.IsDefault).HasDefaultValue(false);
             entity.Property(e => e.IsActive).HasDefaultValue(true);
             entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+        });
+
+        modelBuilder.Entity<ScheduledVehiclePickup>(entity =>
+        {
+            entity.HasIndex(e => new { e.AssignedDriverUserId, e.Status, e.ScheduledPickupDate },
+                "IX_ScheduledVehiclePickups_Driver_Status_Date");
+
+            entity.Property(e => e.Vin).HasMaxLength(17);
+            entity.Property(e => e.Make).HasMaxLength(100);
+            entity.Property(e => e.Model).HasMaxLength(100);
+            entity.Property(e => e.Observations).HasMaxLength(2000);
+            entity.Property(e => e.PurchasePrice).HasPrecision(12, 2);
+            entity.Property(e => e.PickupAddress).HasMaxLength(500);
+            entity.Property(e => e.SellerName).HasMaxLength(150);
+            entity.Property(e => e.SellerPhone).HasMaxLength(40);
+            entity.Property(e => e.SellerEmail).HasMaxLength(256);
+            entity.Property(e => e.PaymentMethod).HasMaxLength(80);
+            entity.Property(e => e.ImageRelativePath).HasMaxLength(400);
+            entity.Property(e => e.ScheduledPickupWindow).HasMaxLength(80);
+            entity.Property(e => e.Status).HasDefaultValue((byte)0);
+            entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(d => d.AssignedDriver).WithMany(p => p.AssignedPickups)
+                .HasForeignKey(d => d.AssignedDriverUserId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_ScheduledVehiclePickups_AssignedDriver");
+
+            entity.HasOne(d => d.CreatedByUser).WithMany(p => p.CreatedPickups)
+                .HasForeignKey(d => d.CreatedByUserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_ScheduledVehiclePickups_CreatedBy");
+
+            entity.HasOne(d => d.PromotedVehicle).WithMany()
+                .HasForeignKey(d => d.PromotedVehicleId)
+                .HasConstraintName("FK_ScheduledVehiclePickups_PromotedVehicle");
+
+            entity.HasOne(d => d.VehicleSource).WithMany()
+                .HasForeignKey(d => d.VehicleSourceId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_ScheduledVehiclePickups_VehicleSources");
+        });
+
+        modelBuilder.Entity<ScheduledVehiclePickupImage>(entity =>
+        {
+            entity.HasIndex(e => new { e.ScheduledId, e.SortOrder, e.Id },
+                "IX_ScheduledVehiclePickupImages_ScheduledId_SortOrder");
+
+            entity.Property(e => e.RelativePath).HasMaxLength(400);
+            entity.Property(e => e.SortOrder).HasDefaultValue(0);
+            entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(d => d.Scheduled).WithMany(p => p.Images)
+                .HasForeignKey(d => d.ScheduledId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_ScheduledVehiclePickupImages_Schedule");
+        });
+
+        modelBuilder.Entity<RecycleLoad>(entity =>
+        {
+            entity.HasIndex(e => new { e.DriverUserId, e.RecordedAtUtc }, "IX_RecycleLoads_DriverUserId_RecordedAtUtc")
+                .IsDescending(false, true);
+            entity.HasIndex(e => e.LoadExternalId, "IX_RecycleLoads_LoadExternalId");
+            entity.HasIndex(e => new { e.IsVerified, e.RecordedAtUtc }, "IX_RecycleLoads_IsVerified_RecordedAtUtc")
+                .IsDescending(false, true);
+
+            entity.Property(e => e.LoadExternalId).HasMaxLength(80);
+            entity.Property(e => e.TruckNumber).HasMaxLength(40);
+            entity.Property(e => e.RateUsd).HasPrecision(12, 2).HasDefaultValue(575m);
+            entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.IsVerified).HasDefaultValue(false);
+            entity.Property(e => e.RecordedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasIndex(e => e.LoadDate, "IX_RecycleLoads_LoadDate").IsDescending();
+            entity.HasIndex(e => new { e.BillToCompanyId, e.LoadDate }, "IX_RecycleLoads_BillToCompanyId_LoadDate")
+                .IsDescending(false, true);
+
+            entity.HasOne(d => d.Driver).WithMany(p => p.RecycleLoadsAsDriver)
+                .HasForeignKey(d => d.DriverUserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_RecycleLoads_Driver");
+
+            entity.HasOne(d => d.BillToCompany).WithMany()
+                .HasForeignKey(d => d.BillToCompanyId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_RecycleLoads_BillTo");
+
+            entity.HasOne(d => d.RecordedByUser).WithMany(p => p.RecycleLoadsRecorded)
+                .HasForeignKey(d => d.RecordedByUserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_RecycleLoads_RecordedBy");
+
+            entity.HasOne(d => d.VerifiedByUser).WithMany()
+                .HasForeignKey(d => d.VerifiedByUserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_RecycleLoads_VerifiedBy");
+        });
+
+        modelBuilder.Entity<RecycleBillToCompany>(entity =>
+        {
+            entity.Property(e => e.Alias).HasMaxLength(80);
+            entity.Property(e => e.CompanyName).HasMaxLength(200);
+            entity.Property(e => e.AddressLine).HasMaxLength(300);
+            entity.Property(e => e.ContactLine).HasMaxLength(300);
+            entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+        });
+
+        modelBuilder.Entity<RecycleWeeklyInvoice>(entity =>
+        {
+            entity.HasIndex(e => e.InvoiceNumber, "UQ_RecycleWeeklyInvoices_InvoiceNumber").IsUnique();
+            entity.HasIndex(e => new { e.WeekStartDate, e.BillToCompanyId }, "UQ_RecycleWeeklyInvoices_Week_BillTo").IsUnique();
+            entity.HasIndex(e => e.WeekStartDate, "IX_RecycleWeeklyInvoices_WeekStartDate").IsDescending();
+
+            entity.Property(e => e.PdfRelativePath).HasMaxLength(400);
+            entity.Property(e => e.TotalAmountUsd).HasPrecision(12, 2);
+            entity.Property(e => e.GeneratedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(d => d.BillToCompany).WithMany()
+                .HasForeignKey(d => d.BillToCompanyId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_RecycleWeeklyInvoices_BillTo");
+
+            entity.HasOne(d => d.GeneratedByUser).WithMany()
+                .HasForeignKey(d => d.GeneratedByUserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_RecycleWeeklyInvoices_GeneratedBy");
+        });
+
+        modelBuilder.Entity<RecycleLoadDocument>(entity =>
+        {
+            entity.HasIndex(e => new { e.RecycleLoadId, e.DocumentType }, "UQ_RecycleLoadDocuments_Load_Type")
+                .IsUnique();
+
+            entity.Property(e => e.RelativePath).HasMaxLength(400);
+            entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(d => d.RecycleLoad).WithMany(p => p.Documents)
+                .HasForeignKey(d => d.RecycleLoadId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_RecycleLoadDocuments_Load");
+        });
+
+        modelBuilder.Entity<ConstructorActivityLog>(entity =>
+        {
+            entity.HasIndex(e => new { e.DriverUserId, e.RecordedAtUtc },
+                    "IX_ConstructorActivityLogs_DriverUserId_RecordedAtUtc")
+                .IsDescending(false, true);
+
+            entity.Property(e => e.RelativePath).HasMaxLength(400);
+            entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.RecordedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.CreatedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne(d => d.Driver).WithMany(p => p.ConstructorActivitiesAsDriver)
+                .HasForeignKey(d => d.DriverUserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_ConstructorActivityLogs_Driver");
+
+            entity.HasOne(d => d.RecordedByUser).WithMany(p => p.ConstructorActivitiesRecorded)
+                .HasForeignKey(d => d.RecordedByUserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_ConstructorActivityLogs_RecordedBy");
         });
 
         modelBuilder.Entity<Zone>(entity =>
