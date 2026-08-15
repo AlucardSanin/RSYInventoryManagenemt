@@ -11,7 +11,8 @@ This folder holds the SQL Server scripts that define and evolve the yard invento
 | `010_VehiclePickupDriver.sql` | Driver who collected the vehicle (`PickupDriver`). |
 | `011_VehicleInvoiceAndPayment.sql` | Payment method, invoice number (from 1000), `InvoiceSequence`. |
 | `015_DriverPickupSchedule.sql` | Driver role, language + access token, scheduled pickups + images; seeds drivers from `PickupDriver`. |
-| `016_OptionalDriverAndPickupTime.sql` | Optional assigned driver + `ScheduledPickupWindow` text (e.g. "9 - 12pm"). |
+| `021_RecycleInvoiceSequenceFrom21.sql` | Recycle invoice sequence reset notes. |
+| `022_VehiclePriceHistory.sql` | Purchase-price change history for acquired vehicles and scheduled pickups. |
 
 ## Workflow
 

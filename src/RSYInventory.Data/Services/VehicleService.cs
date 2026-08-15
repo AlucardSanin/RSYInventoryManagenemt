@@ -9,11 +9,16 @@ public class VehicleService
 {
     private readonly IDbContextFactory<YardInventoryDbContext> _dbFactory;
     private readonly ICurrentUserService _currentUser;
+    private readonly VehiclePriceHistoryService _priceHistory;
 
-    public VehicleService(IDbContextFactory<YardInventoryDbContext> dbFactory, ICurrentUserService currentUser)
+    public VehicleService(
+        IDbContextFactory<YardInventoryDbContext> dbFactory,
+        ICurrentUserService currentUser,
+        VehiclePriceHistoryService priceHistory)
     {
         _dbFactory = dbFactory;
         _currentUser = currentUser;
+        _priceHistory = priceHistory;
     }
 
     public async Task<List<VehicleSource>> GetSourcesAsync(CancellationToken ct = default)
@@ -496,6 +501,9 @@ public class VehicleService
 
         var (driverUserId, driverName) = await ResolvePickupDriverAsync(db, pickupDriverUserId, ct);
 
+        var previousPrice = vehicle.PurchasePrice;
+        var nextPrice = VehiclePriceHistoryService.Normalize(purchasePrice);
+
         vehicle.Vin = vin;
         vehicle.Year = year;
         vehicle.Make = string.IsNullOrWhiteSpace(make) ? null : make.Trim();
@@ -503,9 +511,7 @@ public class VehicleService
         vehicle.TransmissionType = transmissionType is null ? null : (int)transmissionType;
         vehicle.DriveType = driveType is null ? null : (int)driveType;
         vehicle.Mileage = mileage;
-        vehicle.PurchasePrice = purchasePrice is null or <= 0
-            ? null
-            : Math.Round(purchasePrice.Value, 2, MidpointRounding.AwayFromZero);
+        vehicle.PurchasePrice = nextPrice;
         vehicle.Observations = string.IsNullOrWhiteSpace(observations) ? null : observations.Trim();
         vehicle.AcquisitionLocation = NullIfWhiteSpace(acquisitionLocation);
         vehicle.SellerName = NullIfWhiteSpace(sellerName);
@@ -518,8 +524,15 @@ public class VehicleService
         vehicle.AcquiredAt = acquiredAt;
         vehicle.UpdatedAtUtc = DateTime.UtcNow;
 
+        _priceHistory.AddVehicleChange(db, vehicle.Id, previousPrice, nextPrice);
         await db.SaveChangesAsync(ct);
+        await _priceHistory.WriteAuditForVehicleAsync(vehicle.Id, previousPrice, nextPrice, ct);
     }
+
+    public Task<IReadOnlyList<VehiclePriceHistory>> GetPriceHistoryAsync(
+        int vehicleId,
+        CancellationToken ct = default)
+        => _priceHistory.GetForVehicleAsync(vehicleId, ct);
 
     /// <summary>Assigns the next invoice number (from 1000) if the vehicle has none yet.</summary>
     public async Task<int> EnsureInvoiceNumberAsync(int vehicleId, CancellationToken ct = default)

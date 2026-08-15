@@ -89,6 +89,8 @@ public partial class Vehicle
 
     public virtual ICollection<VehicleImage> Images { get; set; } = new List<VehicleImage>();
 
+    public virtual ICollection<VehiclePriceHistory> PriceHistory { get; set; } = new List<VehiclePriceHistory>();
+
     public virtual Pallet? Pallet { get; set; }
 
     public virtual VehicleSource VehicleSource { get; set; } = null!;

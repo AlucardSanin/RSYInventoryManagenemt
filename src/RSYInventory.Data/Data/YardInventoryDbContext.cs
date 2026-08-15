@@ -30,6 +30,8 @@ public partial class YardInventoryDbContext : DbContext
 
     public virtual DbSet<VehicleImage> VehicleImages { get; set; }
 
+    public virtual DbSet<VehiclePriceHistory> VehiclePriceHistories { get; set; }
+
     public virtual DbSet<VehicleSource> VehicleSources { get; set; }
 
     public virtual DbSet<InvoiceTemplate> InvoiceTemplates { get; set; }
@@ -255,6 +257,40 @@ public partial class YardInventoryDbContext : DbContext
                 .HasForeignKey(d => d.VehicleId)
                 .OnDelete(DeleteBehavior.Cascade)
                 .HasConstraintName("FK_VehicleImages_Vehicles");
+        });
+
+        modelBuilder.Entity<VehiclePriceHistory>(entity =>
+        {
+            entity.ToTable("VehiclePriceHistory");
+            entity.HasIndex(e => new { e.VehicleId, e.ChangedAtUtc }, "IX_VehiclePriceHistory_VehicleId_ChangedAt")
+                .IsDescending(false, true);
+            entity.HasIndex(e => new { e.ScheduledVehiclePickupId, e.ChangedAtUtc }, "IX_VehiclePriceHistory_ScheduleId_ChangedAt")
+                .IsDescending(false, true);
+            entity.HasIndex(e => e.ChangedByUserId, "IX_VehiclePriceHistory_ChangedByUserId");
+
+            entity.Property(e => e.OldPrice).HasPrecision(12, 2);
+            entity.Property(e => e.NewPrice).HasPrecision(12, 2);
+            entity.Property(e => e.Notes).HasMaxLength(500);
+            entity.Property(e => e.ChangedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.ToTable(t => t.HasCheckConstraint(
+                "CK_VehiclePriceHistory_Subject",
+                "([VehicleId] IS NOT NULL AND [ScheduledVehiclePickupId] IS NULL) OR ([VehicleId] IS NULL AND [ScheduledVehiclePickupId] IS NOT NULL)"));
+
+            entity.HasOne(d => d.Vehicle).WithMany(p => p.PriceHistory)
+                .HasForeignKey(d => d.VehicleId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_VehiclePriceHistory_Vehicles");
+
+            entity.HasOne(d => d.ScheduledVehiclePickup).WithMany(p => p.PriceHistory)
+                .HasForeignKey(d => d.ScheduledVehiclePickupId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_VehiclePriceHistory_ScheduledVehiclePickups");
+
+            entity.HasOne(d => d.ChangedByUser).WithMany(p => p.VehiclePriceChanges)
+                .HasForeignKey(d => d.ChangedByUserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_VehiclePriceHistory_Users");
         });
 
         modelBuilder.Entity<VehicleSource>(entity =>

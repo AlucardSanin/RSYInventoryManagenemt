@@ -125,6 +125,28 @@ else
                         <div class="col-md-4">
                             <label class="form-label" for="price-input">Precio de compra <span class="form-hint">(USD)</span></label>
                             <UsdMoneyInput InputId="price-input" @bind-Value="_model.PurchasePrice" Placeholder="2500.00" />
+                            @if (_priceHistory.Count > 0)
+                            {
+                                <div class="price-history price-history--compact">
+                                    <div class="price-history__title">Precios anteriores</div>
+                                    <ul class="price-history__list">
+                                        @foreach (var h in _priceHistory)
+                                        {
+                                            <li>
+                                                <span class="price-history__change">
+                                                    @UsdMoney.FormatOrDash(h.OldPrice)
+                                                    <span aria-hidden="true">→</span>
+                                                    @UsdMoney.FormatOrDash(h.NewPrice)
+                                                </span>
+                                                <span class="price-history__meta">
+                                                    @h.ChangedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                                                    · @(h.ChangedByUser?.DisplayName ?? "usuario")
+                                                </span>
+                                            </li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Método de pago <span class="form-hint">(opcional)</span></label>
@@ -272,6 +294,7 @@ else
         VehicleYearCatalog.AllYears.Select(y => new ComboOption(y, y)).ToList();
 
     private readonly ScheduleModel _model = new() { ScheduledPickupDate = YardTimeZone.TodayEastern() };
+    private List<VehiclePriceHistory> _priceHistory = [];
     private List<VehicleSource> _sources = [];
     private List<ComboOption> _sourceOptions = [];
     private List<ComboOption> _makeOptions = [];
@@ -362,6 +385,11 @@ else
                     _model.VehicleSourceId = existing.VehicleSourceId;
                     _model.ScheduledPickupDate = existing.ScheduledPickupDate;
                     _model.ScheduledPickupWindow = existing.ScheduledPickupWindow;
+                    _priceHistory = (await Schedules.GetPriceHistoryAsync(Id!.Value)).ToList();
+                }
+                else
+                {
+                    _priceHistory = [];
                 }
 
                 if (!string.IsNullOrWhiteSpace(_model.Make) && _model.Year is not null)

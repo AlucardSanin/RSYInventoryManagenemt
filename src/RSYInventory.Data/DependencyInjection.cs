@@ -30,6 +30,7 @@ public static class DependencyInjection
         services.AddScoped<UserAdminService>();
         services.AddScoped<InventoryService>();
         services.AddScoped<VehicleService>();
+        services.AddScoped<VehiclePriceHistoryService>();
         services.AddScoped<PickupScheduleService>();
         services.AddScoped<RecycleLoadService>();
         services.AddScoped<RecycleInvoiceService>();

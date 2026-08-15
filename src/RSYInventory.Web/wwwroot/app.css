@@ -940,6 +940,57 @@ code, .mono {
     font-size: 1rem;
 }
 
+.price-history {
+    margin-top: 0.55rem;
+    padding: 0.55rem 0.65rem;
+    border-radius: 0.45rem;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+}
+
+.price-history--compact {
+    margin-top: 0.4rem;
+}
+
+.price-history__title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--rsy-muted);
+    margin-bottom: 0.35rem;
+}
+
+.price-history__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.35rem;
+}
+
+.price-history__list li {
+    display: grid;
+    gap: 0.1rem;
+}
+
+.price-history__change {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--rsy-ink);
+}
+
+.price-history__change span {
+    margin: 0 0.25rem;
+    color: var(--rsy-muted);
+    font-weight: 500;
+}
+
+.price-history__meta {
+    font-size: 0.78rem;
+    color: var(--rsy-muted);
+}
+
 .detail-grid__full {
     grid-column: 1 / -1;
 }
