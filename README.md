@@ -13,26 +13,32 @@ Solución: `RSYInventory.slnx`
 
 ## Depurar en Visual Studio (tu PC)
 
-El agente Cloud empuja cambios a GitHub; en tu máquina actualiza la rama:
-
 ```powershell
 git fetch origin
-git checkout cursor/yard-inventory-foundation-a4a6
-git pull origin cursor/yard-inventory-foundation-a4a6
+git checkout cursor/vehicle-price-history-a4a6
+git pull origin cursor/vehicle-price-history-a4a6
 ```
 
 1. Abre `RSYInventory.slnx` en Visual Studio 2022.
-2. BD local ya creada: **`RSYYardInventory`** en `.\MSSQLSERVER01`.
-3. Connection string (solo cambias esto al pasar al servidor):
-   - **Local (Development):** `src/RSYInventory.Web/appsettings.Development.json`
-     ```
-     Server=.\MSSQLSERVER01;Database=RSYYardInventory;Trusted_Connection=True;TrustServerCertificate=True;
-     ```
-   - **Servidor (Production):** `src/RSYInventory.Web/appsettings.Production.json`
-4. Esquema y datos de referencia: aplica `resources/Database/*.sql` en SSMS. La app **no** llama a `EnsureCreated` ni crea la BD.
-5. Proyecto de inicio: `RSYInventory.Web` → F5.
+2. BD local: **`RSYYardInventory`** en `.\MSSQLSERVER01`.
+3. Connection string (Development ya apunta a esa instancia):
+   ```
+   Server=.\MSSQLSERVER01;Database=RSYYardInventory;Trusted_Connection=True;TrustServerCertificate=True;Encrypt=False;Connect Timeout=30;
+   ```
+   `Encrypt=False` + `TrustServerCertificate=True` evita el error de certificado SSL de SQL Client en local.
+4. Si F5 usa el perfil **https** y falla el certificado del sitio: `dotnet dev-certs https --trust`
+5. En el servidor (Production): edita `appsettings.Production.json` o variables de entorno (`ConnectionStrings__YardInventory`). No dejes `YOUR_PRODUCTION_SERVER`.
+6. Esquema: scripts en `resources/Database/*.sql` (SSMS). La app no crea la BD.
+7. Proyecto de inicio: `RSYInventory.Web` → F5. Al arrancar el log debe decir `Conexión a RSYYardInventory OK.`
 
-El usuario actual se lee **desde la tabla `Users`** (`App:CurrentUserName` = `demo`).
+## Si no carga la BD ni los certificados
+
+| Síntoma | Causa habitual | Qué hacer |
+|---------|----------------|-----------|
+| Error SSL / certificate chain al conectar SQL | SqlClient cifra por defecto | Usa `Encrypt=False` (local) o `TrustServerCertificate=True` |
+| Login/páginas vacías, sin datos | Connection string apunta a otra instancia (p. ej. LocalDB) | Confirma `.\MSSQLSERVER01` en Development |
+| Sitio HTTPS no abre en VS | Certificado de desarrollo no confiable | `dotnet dev-certs https --trust` o usa perfil **http** |
+| Tras publicar en IIS, sesión/uploads rotos | DataProtection sin escritura | Permiso de escritura en `App_Data/dataprotection-keys` para el App Pool |
 
 ## Pantallas web (ya disponibles)
 
