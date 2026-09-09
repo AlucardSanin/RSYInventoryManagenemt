@@ -10,15 +10,18 @@ public sealed class PickupScheduleService
     private readonly IDbContextFactory<YardInventoryDbContext> _dbFactory;
     private readonly ICurrentUserService _currentUser;
     private readonly AuditService _audit;
+    private readonly VehiclePriceHistoryService _priceHistory;
 
     public PickupScheduleService(
         IDbContextFactory<YardInventoryDbContext> dbFactory,
         ICurrentUserService currentUser,
-        AuditService audit)
+        AuditService audit,
+        VehiclePriceHistoryService priceHistory)
     {
         _dbFactory = dbFactory;
         _currentUser = currentUser;
         _audit = audit;
+        _priceHistory = priceHistory;
     }
 
     public async Task<List<User>> GetDriverUsersAsync(CancellationToken ct = default)
@@ -273,6 +276,9 @@ public sealed class PickupScheduleService
         }
 
         var previousVin = entity.Vin;
+        var previousPrice = entity.PurchasePrice;
+        var nextPrice = VehiclePriceHistoryService.Normalize(purchasePrice);
+
         entity.Vin = vin;
         entity.Year = year;
         entity.Make = NullIfWhiteSpace(make);
@@ -280,9 +286,7 @@ public sealed class PickupScheduleService
         entity.TransmissionType = transmissionType is null ? null : (int)transmissionType;
         entity.DriveType = driveType is null ? null : (int)driveType;
         entity.Mileage = mileage;
-        entity.PurchasePrice = purchasePrice is null or <= 0
-            ? null
-            : Math.Round(purchasePrice.Value, 2, MidpointRounding.AwayFromZero);
+        entity.PurchasePrice = nextPrice;
         entity.Observations = NullIfWhiteSpace(observations);
         entity.VehicleSourceId = vehicleSourceId;
         entity.ScheduledPickupDate = scheduledPickupDate;
@@ -295,7 +299,9 @@ public sealed class PickupScheduleService
         entity.AssignedDriverUserId = driverId;
         entity.UpdatedAtUtc = DateTime.UtcNow;
 
+        _priceHistory.AddScheduleChange(db, entity.Id, previousPrice, nextPrice);
         await db.SaveChangesAsync(ct);
+        await _priceHistory.WriteAuditForScheduleAsync(entity.Id, previousPrice, nextPrice, ct);
 
         await _audit.WriteAsync(
             "PickupScheduleUpdated",
@@ -305,9 +311,17 @@ public sealed class PickupScheduleService
             previousVin == entity.Vin
                 ? $"Fecha {entity.ScheduledPickupDate:yyyy-MM-dd}"
                   + (string.IsNullOrWhiteSpace(entity.ScheduledPickupWindow) ? "" : $" · {entity.ScheduledPickupWindow}")
+                  + (VehiclePriceHistoryService.HasChanged(previousPrice, nextPrice)
+                      ? $" · precio {previousPrice?.ToString("0.00") ?? "—"} → {nextPrice?.ToString("0.00") ?? "—"}"
+                      : "")
                 : $"VIN {previousVin} → {entity.Vin}; fecha {entity.ScheduledPickupDate:yyyy-MM-dd}",
             ct);
     }
+
+    public Task<IReadOnlyList<VehiclePriceHistory>> GetPriceHistoryAsync(
+        int scheduledPickupId,
+        CancellationToken ct = default)
+        => _priceHistory.GetForScheduleAsync(scheduledPickupId, ct);
 
     public async Task DeletePendingAsync(int id, CancellationToken ct = default)
     {
@@ -869,6 +883,8 @@ public sealed class PickupScheduleService
             Notes = $"Recogido desde agenda de recolección #{s.Id}",
             MovedAtUtc = DateTime.UtcNow
         });
+
+        await _priceHistory.CopyScheduleHistoryToVehicleAsync(db, s.Id, vehicle.Id, ct);
 
         s.Status = (byte)ScheduledPickupStatus.Promoted;
         s.PromotedVehicleId = vehicle.Id;

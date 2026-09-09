@@ -69,4 +69,6 @@ public partial class ScheduledVehiclePickup
     public virtual VehicleSource VehicleSource { get; set; } = null!;
 
     public virtual ICollection<ScheduledVehiclePickupImage> Images { get; set; } = new List<ScheduledVehiclePickupImage>();
+
+    public virtual ICollection<VehiclePriceHistory> PriceHistory { get; set; } = new List<VehiclePriceHistory>();
 }

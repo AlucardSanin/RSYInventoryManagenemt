@@ -102,7 +102,31 @@ else if (_vehicle is not null && !_editing)
                     </div>
                     <div>
                         <dt>Precio de compra</dt>
-                        <dd>@UsdMoney.FormatOrDash(_vehicle.PurchasePrice)</dd>
+                        <dd>
+                            <div>@UsdMoney.FormatOrDash(_vehicle.PurchasePrice)</div>
+                            @if (_priceHistory.Count > 0)
+                            {
+                                <div class="price-history">
+                                    <div class="price-history__title">Precios anteriores</div>
+                                    <ul class="price-history__list">
+                                        @foreach (var h in _priceHistory)
+                                        {
+                                            <li>
+                                                <span class="price-history__change">
+                                                    @UsdMoney.FormatOrDash(h.OldPrice)
+                                                    <span aria-hidden="true">→</span>
+                                                    @UsdMoney.FormatOrDash(h.NewPrice)
+                                                </span>
+                                                <span class="price-history__meta">
+                                                    @FormatPriceChangeWhen(h.ChangedAtUtc)
+                                                    · @(h.ChangedByUser?.DisplayName ?? h.ChangedByUser?.UserName ?? "usuario")
+                                                </span>
+                                            </li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
+                        </dd>
                     </div>
                     <div>
                         <dt>Fuente</dt>
@@ -373,6 +397,7 @@ else if (_vehicle is not null && _editing)
 
     private Vehicle? _vehicle;
     private EditModel _edit = new();
+    private List<VehiclePriceHistory> _priceHistory = [];
     private List<ComboOption> _sourceOptions = [];
     private List<ComboOption> _makeOptions = [];
     private List<ComboOption> _modelOptions = [];
@@ -433,10 +458,12 @@ else if (_vehicle is not null && _editing)
                 if (_vehicle is null)
                 {
                     _error = "Vehículo no encontrado.";
+                    _priceHistory = [];
                     return;
                 }
 
                 _images = MediaPaths.ToUrls(VehicleService.GetImagePaths(_vehicle)).ToList();
+                _priceHistory = (await Vehicles.GetPriceHistoryAsync(Id)).ToList();
             }, "Cargando vehículo…");
         }
         catch (Exception ex)
@@ -811,6 +838,9 @@ else if (_vehicle is not null && _editing)
         (int)VehicleDriveType.FourByTwo => "4x2",
         _ => "—"
     };
+
+    private static string FormatPriceChangeWhen(DateTime utc)
+        => utc.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
 
     private sealed class EditModel
     {
