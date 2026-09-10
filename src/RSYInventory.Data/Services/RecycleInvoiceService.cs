@@ -112,7 +112,9 @@ public sealed class RecycleInvoiceService
             .AsNoTracking()
             .Include(i => i.BillToCompany)
             .Include(i => i.GeneratedByUser)
+            .Include(i => i.Payment)!.ThenInclude(p => p!.RecordedByUser)
             .OrderByDescending(i => i.WeekStartDate)
+            .ThenByDescending(i => i.InvoiceNumber)
             .Take(100)
             .ToListAsync(ct);
     }
@@ -375,6 +377,112 @@ public sealed class RecycleInvoiceService
 
         return path;
     }
+
+    /// <summary>
+    /// Registers or replaces the check payment for an invoice.
+    /// Status is derived: Paid when amounts match, AmountMismatch otherwise.
+    /// </summary>
+    public async Task<RecycleInvoicePayment> UpsertPaymentAsync(
+        int invoiceId,
+        string checkImageRelativePath,
+        DateOnly checkDate,
+        decimal amountUsd,
+        string? notes,
+        CancellationToken ct = default)
+    {
+        EnsureCanManage();
+
+        if (string.IsNullOrWhiteSpace(checkImageRelativePath))
+            throw new InvalidOperationException("Sube la imagen del cheque.");
+        if (amountUsd <= 0)
+            throw new InvalidOperationException("El monto del cheque debe ser mayor que cero.");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var invoice = await db.RecycleWeeklyInvoices
+            .Include(i => i.Payment)
+            .Include(i => i.BillToCompany)
+            .FirstOrDefaultAsync(i => i.Id == invoiceId, ct)
+            ?? throw new InvalidOperationException("Invoice no encontrado.");
+
+        var amount = Math.Round(amountUsd, 2, MidpointRounding.AwayFromZero);
+        var note = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
+        var path = checkImageRelativePath.Trim();
+        var wasUpdate = invoice.Payment is not null;
+
+        if (invoice.Payment is null)
+        {
+            invoice.Payment = new RecycleInvoicePayment
+            {
+                RecycleWeeklyInvoiceId = invoice.Id,
+                CheckImageRelativePath = path,
+                CheckDate = checkDate,
+                AmountUsd = amount,
+                Notes = note,
+                RecordedAtUtc = DateTime.UtcNow,
+                RecordedByUserId = _currentUser.UserId
+            };
+            db.RecycleInvoicePayments.Add(invoice.Payment);
+        }
+        else
+        {
+            invoice.Payment.CheckImageRelativePath = path;
+            invoice.Payment.CheckDate = checkDate;
+            invoice.Payment.AmountUsd = amount;
+            invoice.Payment.Notes = note;
+            invoice.Payment.UpdatedAtUtc = DateTime.UtcNow;
+            // Keep original RecordedAtUtc / RecordedByUserId as first registration;
+            // UpdatedAtUtc tracks later edits.
+        }
+
+        await db.SaveChangesAsync(ct);
+
+        var status = ResolvePaymentStatus(invoice.TotalAmountUsd, amount);
+        var statusLabel = FormatPaymentStatus(status);
+        await _audit.WriteAsync(
+            wasUpdate ? "RecycleInvoicePaymentUpdated" : "RecycleInvoicePaymentRecorded",
+            "RecycleWeeklyInvoice",
+            invoice.Id,
+            $"Pago invoice #{invoice.InvoiceNumber}: {statusLabel}",
+            $"Cheque {checkDate:yyyy-MM-dd} · monto {amount:0.00} · invoice {invoice.TotalAmountUsd:0.00}"
+            + (invoice.BillToCompany is null ? "" : $" · {invoice.BillToCompany.Alias}")
+            + (note is null ? "" : $" · nota: {note}"),
+            ct);
+
+        return invoice.Payment!;
+    }
+
+    public async Task<RecycleInvoicePayment?> GetPaymentAsync(int invoiceId, CancellationToken ct = default)
+    {
+        EnsureCanManage();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.RecycleInvoicePayments
+            .AsNoTracking()
+            .Include(p => p.RecordedByUser)
+            .FirstOrDefaultAsync(p => p.RecycleWeeklyInvoiceId == invoiceId, ct);
+    }
+
+    public static RecycleInvoicePaymentStatus ResolvePaymentStatus(decimal invoiceTotal, RecycleInvoicePayment? payment)
+    {
+        if (payment is null)
+            return RecycleInvoicePaymentStatus.Pending;
+        return ResolvePaymentStatus(invoiceTotal, payment.AmountUsd);
+    }
+
+    public static RecycleInvoicePaymentStatus ResolvePaymentStatus(decimal invoiceTotal, decimal paymentAmount)
+    {
+        var invoice = Math.Round(invoiceTotal, 2, MidpointRounding.AwayFromZero);
+        var paid = Math.Round(paymentAmount, 2, MidpointRounding.AwayFromZero);
+        return invoice == paid
+            ? RecycleInvoicePaymentStatus.Paid
+            : RecycleInvoicePaymentStatus.AmountMismatch;
+    }
+
+    public static string FormatPaymentStatus(RecycleInvoicePaymentStatus status) => status switch
+    {
+        RecycleInvoicePaymentStatus.Paid => "Pagado",
+        RecycleInvoicePaymentStatus.AmountMismatch => "Monto distinto",
+        _ => "Pendiente por pago"
+    };
 
     private async Task EnsurePasswordForReplaceAsync(
         YardInventoryDbContext db,

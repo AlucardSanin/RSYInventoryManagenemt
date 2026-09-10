@@ -48,6 +48,8 @@ public partial class YardInventoryDbContext : DbContext
 
     public virtual DbSet<RecycleWeeklyInvoice> RecycleWeeklyInvoices { get; set; }
 
+    public virtual DbSet<RecycleInvoicePayment> RecycleInvoicePayments { get; set; }
+
     public virtual DbSet<ConstructorActivityLog> ConstructorActivityLogs { get; set; }
 
     public virtual DbSet<Zone> Zones { get; set; }
@@ -445,6 +447,31 @@ public partial class YardInventoryDbContext : DbContext
                 .HasForeignKey(d => d.GeneratedByUserId)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_RecycleWeeklyInvoices_GeneratedBy");
+        });
+
+        modelBuilder.Entity<RecycleInvoicePayment>(entity =>
+        {
+            entity.HasIndex(e => e.RecycleWeeklyInvoiceId, "UQ_RecycleInvoicePayments_Invoice").IsUnique();
+            entity.HasIndex(e => e.RecordedAtUtc, "IX_RecycleInvoicePayments_RecordedAtUtc").IsDescending();
+
+            entity.Property(e => e.CheckImageRelativePath).HasMaxLength(400);
+            entity.Property(e => e.AmountUsd).HasPrecision(12, 2);
+            entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.RecordedAtUtc).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.ToTable(t => t.HasCheckConstraint(
+                "CK_RecycleInvoicePayments_Amount",
+                "[AmountUsd] > 0"));
+
+            entity.HasOne(d => d.Invoice).WithOne(p => p.Payment)
+                .HasForeignKey<RecycleInvoicePayment>(d => d.RecycleWeeklyInvoiceId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_RecycleInvoicePayments_Invoice");
+
+            entity.HasOne(d => d.RecordedByUser).WithMany()
+                .HasForeignKey(d => d.RecordedByUserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_RecycleInvoicePayments_User");
         });
 
         modelBuilder.Entity<RecycleLoadDocument>(entity =>
