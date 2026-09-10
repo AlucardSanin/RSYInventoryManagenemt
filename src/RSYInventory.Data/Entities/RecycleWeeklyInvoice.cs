@@ -29,4 +29,6 @@ public partial class RecycleWeeklyInvoice
     public virtual RecycleBillToCompany BillToCompany { get; set; } = null!;
 
     public virtual User GeneratedByUser { get; set; } = null!;
+
+    public virtual RecycleInvoicePayment? Payment { get; set; }
 }
