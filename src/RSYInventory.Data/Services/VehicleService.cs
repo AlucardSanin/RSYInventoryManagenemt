@@ -781,11 +781,8 @@ public class VehicleService
         db.VehicleImages.RemoveRange(vehicle.Images);
         db.Vehicles.Remove(vehicle);
 
-        await using (var tx = await db.Database.BeginTransactionAsync(ct))
-        {
-            await db.SaveChangesAsync(ct);
-            await tx.CommitAsync(ct);
-        }
+        // Single SaveChanges is atomic (works with SqlServerRetryingExecutionStrategy).
+        await db.SaveChangesAsync(ct);
 
         var label = $"{vehicle.Year} {vehicle.Make} {vehicle.Model}".Trim();
         await _audit.WriteAsync(
