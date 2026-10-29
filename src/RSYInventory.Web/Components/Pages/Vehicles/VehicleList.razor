@@ -2,6 +2,7 @@
 @inject VehicleService Vehicles
 @inject ICurrentUserService CurrentUser
 @inject UiBusyService Busy
+@inject ToastService Toasts
 @inject NavigationManager Nav
 
 <PageTitle>Vehículos</PageTitle>
@@ -165,6 +166,13 @@ else
                                         @(v.Pallet is null ? "Ubicar" : "Mover")
                                     </a>
                                 }
+                                @if (CurrentUser.CanManageUsers)
+                                {
+                                    <button type="button"
+                                            class="btn btn-sm btn-outline-danger"
+                                            title="Eliminar vehículo"
+                                            @onclick="() => AskDelete(v)">Eliminar</button>
+                                }
                             </td>
                         </tr>
                     }
@@ -191,6 +199,52 @@ else
 
 <ImageViewer @ref="_viewer" />
 
+@if (_deleteTarget is not null)
+{
+    <div class="modal-backdrop show"></div>
+    <div class="modal d-block" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5">Eliminar vehículo</h2>
+                    <button type="button" class="btn-close" @onclick="CancelDelete"></button>
+                </div>
+                <div class="modal-body">
+                    <p>
+                        ¿Seguro que quieres eliminar <code>@_deleteTarget.Vin</code>
+                        @if (!string.IsNullOrWhiteSpace($"{_deleteTarget.Make} {_deleteTarget.Model}".Trim()))
+                        {
+                            <text> (@_deleteTarget.Year @_deleteTarget.Make @_deleteTarget.Model)</text>
+                        }
+                        de los vehículos adquiridos?
+                    </p>
+                    <p class="form-hint mb-0">
+                        Se borran sus fotos, movimientos e historial de precio. Si vino de la agenda de recolección,
+                        esa recolección vuelve a quedar pendiente. Esta acción no se puede deshacer.
+                    </p>
+                    @if (_deleteTarget.Pallet is not null || _deleteTarget.InvoiceNumber is not null)
+                    {
+                        <div class="alert alert-warning mt-3 mb-0">
+                            @if (_deleteTarget.Pallet is not null)
+                            {
+                                <div>Está ubicado en @YardLayoutService.FormatPalletLabel(_deleteTarget.Pallet).</div>
+                            }
+                            @if (_deleteTarget.InvoiceNumber is not null)
+                            {
+                                <div>Ya tiene recibo #@_deleteTarget.InvoiceNumber.</div>
+                            }
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CancelDelete">Cancelar</button>
+                    <button type="button" class="btn btn-danger" disabled="@Busy.IsBusy" @onclick="ConfirmDeleteAsync">Eliminar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private const int PageSize = 25;
 
@@ -203,6 +257,7 @@ else
     private string _locationFilter = string.Empty;
     private string _driverFilterId = string.Empty;
     private ImageViewer? _viewer;
+    private Vehicle? _deleteTarget;
 
     private int _pageCount => Math.Max(1, (int)Math.Ceiling(_totalCount / (double)PageSize));
     private int _fromIndex => _totalCount == 0 ? 0 : ((_page - 1) * PageSize) + 1;
@@ -310,6 +365,32 @@ else
     }
 
     private void GoToDetail(int id) => Nav.NavigateTo($"vehicles/{id}");
+
+    private void AskDelete(Vehicle v) => _deleteTarget = v;
+    private void CancelDelete() => _deleteTarget = null;
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (_deleteTarget is null || Busy.IsBusy) return;
+        var id = _deleteTarget.Id;
+        var vin = _deleteTarget.Vin;
+        _error = null;
+        try
+        {
+            await Busy.RunAsync(async () =>
+            {
+                await Vehicles.DeleteAsync(id);
+                await LoadPageAsync();
+            }, "Eliminando…");
+            Toasts.Success($"Vehículo {vin} eliminado.");
+            _deleteTarget = null;
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex.Message);
+            _error = ex.Message;
+        }
+    }
 
     private async Task OpenViewer(IReadOnlyList<string> images)
     {

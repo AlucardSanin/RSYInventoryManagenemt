@@ -195,23 +195,42 @@ else
                             <th>Semana</th>
                             <th>BILL TO</th>
                             <th>Total</th>
+                            <th>Pago</th>
                             <th>Generado</th>
-                            <th class="text-end">PDF</th>
+                            <th class="text-end">Acciones</th>
                         </tr>
                     </thead>
                     <tbody>
                         @foreach (var inv in _invoices)
                         {
+                            var payStatus = RecycleInvoiceService.ResolvePaymentStatus(inv.TotalAmountUsd, inv.Payment);
                             <tr>
                                 <td><code>@inv.InvoiceNumber</code></td>
                                 <td>@inv.WeekStartDate.ToString("yyyy-MM-dd") → @inv.WeekEndDate.ToString("yyyy-MM-dd")</td>
                                 <td>@(inv.BillToCompany?.Alias ?? "—")</td>
                                 <td>@UsdMoney.Format(inv.TotalAmountUsd)</td>
+                                <td>
+                                    <span class="badge-status @PaymentBadgeClass(payStatus)">
+                                        @RecycleInvoiceService.FormatPaymentStatus(payStatus)
+                                    </span>
+                                    @if (inv.Payment is not null)
+                                    {
+                                        <div class="form-hint mb-0">
+                                            Cheque @UsdMoney.Format(inv.Payment.AmountUsd)
+                                            · @inv.Payment.CheckDate.ToString("yyyy-MM-dd")
+                                        </div>
+                                    }
+                                </td>
                                 <td>@YardTimeZone.ToEastern(inv.GeneratedAtUtc).ToString("yyyy-MM-dd HH:mm")</td>
                                 <td class="text-end">
                                     <a class="btn btn-sm btn-outline-secondary" href="@inv.PdfRelativePath" target="_blank" rel="noopener">Ver PDF</a>
                                     <button type="button" class="btn btn-sm btn-outline-primary"
                                             @onclick="() => DownloadInvoiceAsync(inv)">Descargar</button>
+                                    <button type="button" class="btn btn-sm btn-outline-success"
+                                            disabled="@Busy.IsBusy"
+                                            @onclick="() => OpenPaymentModal(inv)">
+                                        @(inv.Payment is null ? "Registrar pago" : "Editar pago")
+                                    </button>
                                     <button type="button" class="btn btn-sm btn-outline-danger"
                                             disabled="@Busy.IsBusy"
                                             @onclick="() => AskDeleteInvoice(inv)">Eliminar</button>
@@ -564,6 +583,90 @@ else
     </div>
 }
 
+@if (_paymentInvoice is not null)
+{
+    <div class="modal-backdrop show"></div>
+    <div class="modal d-block" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5">
+                        Pago invoice #@_paymentInvoice.InvoiceNumber
+                        · @UsdMoney.Format(_paymentInvoice.TotalAmountUsd)
+                    </h2>
+                    <button type="button" class="btn-close" @onclick="ClosePaymentModal"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(_paymentError))
+                    {
+                        <div class="alert alert-danger py-2">@_paymentError</div>
+                    }
+                    <p class="text-muted small mb-3">
+                        Semana @_paymentInvoice.WeekStartDate.ToString("yyyy-MM-dd") → @_paymentInvoice.WeekEndDate.ToString("yyyy-MM-dd")
+                        · BILL TO @(_paymentInvoice.BillToCompany?.Alias ?? "—")
+                    </p>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Fecha del cheque *</label>
+                            <InputDate class="form-control" @bind-Value="_paymentCheckDate" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Monto del cheque (USD) *</label>
+                            <UsdMoneyInput InputId="payment-amount" @bind-Value="_paymentAmount" Placeholder="2300.00" />
+                            @if (_paymentAmount is > 0
+                                 && Math.Round(_paymentAmount.Value, 2) != Math.Round(_paymentInvoice.TotalAmountUsd, 2))
+                            {
+                                <div class="form-hint text-warning mb-0">
+                                    El monto difiere del invoice (@UsdMoney.Format(_paymentInvoice.TotalAmountUsd)). Se guardará como “Monto distinto”.
+                                </div>
+                            }
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Imagen del cheque *</label>
+                            <InputFile class="form-control" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                                       OnChange="OnPaymentImageSelected" />
+                            @if (!string.IsNullOrWhiteSpace(_paymentImagePath))
+                            {
+                                <div class="mt-2">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary"
+                                            @onclick="() => OpenPaymentImage()">Ver imagen actual</button>
+                                </div>
+                            }
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Nota <span class="form-hint">(opcional)</span></label>
+                            <InputTextArea class="form-control" rows="2" @bind-Value="_paymentNotes" />
+                        </div>
+                        @if (_paymentInvoice.Payment is not null)
+                        {
+                            <div class="col-12">
+                                <div class="form-hint mb-0">
+                                    Registrado en plataforma:
+                                    @YardTimeZone.ToEastern(_paymentInvoice.Payment.RecordedAtUtc).ToString("yyyy-MM-dd HH:mm")
+                                    · @(_paymentInvoice.Payment.RecordedByUser?.DisplayName ?? "usuario")
+                                    @if (_paymentInvoice.Payment.UpdatedAtUtc is not null)
+                                    {
+                                        <span>
+                                            · actualizado
+                                            @YardTimeZone.ToEastern(_paymentInvoice.Payment.UpdatedAtUtc.Value).ToString("yyyy-MM-dd HH:mm")
+                                        </span>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="ClosePaymentModal">Cancelar</button>
+                    <button type="button" class="btn btn-primary" disabled="@Busy.IsBusy" @onclick="SavePaymentAsync">
+                        Guardar pago
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 <ImageViewer @ref="_viewer" />
 
 @code {
@@ -618,6 +721,14 @@ else
     private bool _needReplacePassword;
     private string _replacePassword = "";
     private RecycleWeeklyInvoice? _deleteInvoiceTarget;
+
+    private RecycleWeeklyInvoice? _paymentInvoice;
+    private DateTime? _paymentCheckDate = DateTime.Today;
+    private decimal? _paymentAmount;
+    private string? _paymentNotes;
+    private string? _paymentImagePath;
+    private IBrowserFile? _paymentPendingFile;
+    private string? _paymentError;
 
     protected override async Task OnInitializedAsync()
     {
@@ -1059,6 +1170,109 @@ else
     }
 
     private void AskDeleteInvoice(RecycleWeeklyInvoice inv) => _deleteInvoiceTarget = inv;
+
+    private static string PaymentBadgeClass(RecycleInvoicePaymentStatus status) => status switch
+    {
+        RecycleInvoicePaymentStatus.Paid => "badge-status--ok",
+        RecycleInvoicePaymentStatus.AmountMismatch => "badge-status--warn",
+        _ => "badge-status--muted"
+    };
+
+    private void OpenPaymentModal(RecycleWeeklyInvoice inv)
+    {
+        _paymentError = null;
+        _paymentInvoice = inv;
+        _paymentPendingFile = null;
+        if (inv.Payment is not null)
+        {
+            _paymentCheckDate = inv.Payment.CheckDate.ToDateTime(TimeOnly.MinValue);
+            _paymentAmount = inv.Payment.AmountUsd;
+            _paymentNotes = inv.Payment.Notes;
+            _paymentImagePath = inv.Payment.CheckImageRelativePath;
+        }
+        else
+        {
+            _paymentCheckDate = DateTime.Today;
+            _paymentAmount = inv.TotalAmountUsd;
+            _paymentNotes = null;
+            _paymentImagePath = null;
+        }
+    }
+
+    private void ClosePaymentModal()
+    {
+        _paymentInvoice = null;
+        _paymentPendingFile = null;
+        _paymentError = null;
+    }
+
+    private void OnPaymentImageSelected(InputFileChangeEventArgs e)
+    {
+        _paymentError = null;
+        _paymentPendingFile = e.FileCount > 0 ? e.File : null;
+    }
+
+    private async Task OpenPaymentImage()
+    {
+        if (string.IsNullOrWhiteSpace(_paymentImagePath) || _viewer is null) return;
+        await _viewer.OpenAsync([_paymentImagePath], 0);
+    }
+
+    private async Task SavePaymentAsync()
+    {
+        if (_paymentInvoice is null || Busy.IsBusy) return;
+        _paymentError = null;
+        try
+        {
+            if (_paymentCheckDate is null)
+                throw new InvalidOperationException("Indica la fecha del cheque.");
+            if (_paymentAmount is null or <= 0)
+                throw new InvalidOperationException("Indica el monto del cheque.");
+            if (_paymentPendingFile is null && string.IsNullOrWhiteSpace(_paymentImagePath))
+                throw new InvalidOperationException("Sube la imagen del cheque.");
+
+            await Busy.RunAsync(async () =>
+            {
+                var imagePath = _paymentImagePath;
+                string? oldPath = _paymentInvoice.Payment?.CheckImageRelativePath;
+
+                if (_paymentPendingFile is not null)
+                {
+                    await using var stream = _paymentPendingFile.OpenReadStream(maxAllowedSize: 8 * 1024 * 1024);
+                    imagePath = await Media.SaveAsync(
+                        stream,
+                        _paymentPendingFile.Name,
+                        "recycle-payments",
+                        _paymentInvoice.Id,
+                        _paymentInvoice.BillToCompany?.Alias ?? "check");
+                }
+
+                await Invoices.UpsertPaymentAsync(
+                    _paymentInvoice.Id,
+                    imagePath!,
+                    DateOnly.FromDateTime(_paymentCheckDate.Value),
+                    _paymentAmount.Value,
+                    _paymentNotes);
+
+                if (oldPath is not null
+                    && imagePath is not null
+                    && !string.Equals(oldPath, imagePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    Media.TryDelete(oldPath);
+                }
+
+                await LoadInvoicePanelsAsync();
+            }, "Guardando pago…");
+
+            ClosePaymentModal();
+            Toasts.Success("Pago del invoice registrado.");
+        }
+        catch (Exception ex)
+        {
+            _paymentError = ex.Message;
+            Toasts.Error(ex.Message);
+        }
+    }
 
     private async Task ConfirmDeleteInvoiceAsync()
     {

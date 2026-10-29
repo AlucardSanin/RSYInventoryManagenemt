@@ -10,15 +10,18 @@ public class VehicleService
     private readonly IDbContextFactory<YardInventoryDbContext> _dbFactory;
     private readonly ICurrentUserService _currentUser;
     private readonly VehiclePriceHistoryService _priceHistory;
+    private readonly AuditService _audit;
 
     public VehicleService(
         IDbContextFactory<YardInventoryDbContext> dbFactory,
         ICurrentUserService currentUser,
-        VehiclePriceHistoryService priceHistory)
+        VehiclePriceHistoryService priceHistory,
+        AuditService audit)
     {
         _dbFactory = dbFactory;
         _currentUser = currentUser;
         _priceHistory = priceHistory;
+        _audit = audit;
     }
 
     public async Task<List<VehicleSource>> GetSourcesAsync(CancellationToken ct = default)
@@ -742,6 +745,55 @@ public class VehicleService
         });
 
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// God only: permanently removes an acquired vehicle (e.g. marked as picked up by mistake).
+    /// A linked pickup schedule goes back to pending so it can be marked again.
+    /// </summary>
+    public async Task DeleteAsync(int vehicleId, CancellationToken ct = default)
+    {
+        if (!_currentUser.CanManageUsers)
+            throw new UnauthorizedAccessException("Solo un usuario God / System Admin puede eliminar vehículos.");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var vehicle = await db.Vehicles
+            .Include(v => v.Images)
+            .FirstOrDefaultAsync(v => v.Id == vehicleId, ct)
+            ?? throw new InvalidOperationException("Vehículo no encontrado.");
+
+        var schedules = await db.ScheduledVehiclePickups
+            .Where(s => s.PromotedVehicleId == vehicleId)
+            .ToListAsync(ct);
+        foreach (var s in schedules)
+        {
+            s.Status = (byte)ScheduledPickupStatus.Pending;
+            s.PickedUpAtUtc = null;
+            s.PromotedVehicleId = null;
+            s.PromotedAtUtc = null;
+            s.UpdatedAtUtc = DateTime.UtcNow;
+        }
+
+        db.InventoryMovements.RemoveRange(
+            await db.InventoryMovements.Where(m => m.VehicleId == vehicleId).ToListAsync(ct));
+        db.VehiclePriceHistories.RemoveRange(
+            await db.VehiclePriceHistories.Where(h => h.VehicleId == vehicleId).ToListAsync(ct));
+        db.VehicleImages.RemoveRange(vehicle.Images);
+        db.Vehicles.Remove(vehicle);
+
+        // Single SaveChanges is atomic (works with SqlServerRetryingExecutionStrategy).
+        await db.SaveChangesAsync(ct);
+
+        var label = $"{vehicle.Year} {vehicle.Make} {vehicle.Model}".Trim();
+        await _audit.WriteAsync(
+            "VehicleDeleted",
+            "Vehicle",
+            vehicleId,
+            $"Vehículo eliminado: {vehicle.Vin}" + (label.Length > 0 ? $" ({label})" : ""),
+            $"Recibo={(vehicle.InvoiceNumber?.ToString() ?? "-")}; PalletId={(vehicle.PalletId?.ToString() ?? "-")}; "
+            + $"Precio={(vehicle.PurchasePrice?.ToString("0.00") ?? "-")}; "
+            + $"AgendasRevertidas={(schedules.Count == 0 ? "-" : string.Join(",", schedules.Select(s => s.Id)))}",
+            ct);
     }
 
     public static (int? Year, string? Make) TryDecodeVin(string? vin) => VinDecoder.TryDecode(vin);

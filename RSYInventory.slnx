@@ -8,6 +8,7 @@
     <File Path="resources/Database/001_InitialSchema.sql" />
     <File Path="resources/Database/002_DemoUserAndPartsZone.sql" />
     <File Path="resources/Database/022_VehiclePriceHistory.sql" />
+    <File Path="resources/Database/023_RecycleInvoicePayment.sql" />
     <File Path="resources/Database/scaffold-command.txt" />
     <File Path="resources/Database/README.md" />
   </Folder>
